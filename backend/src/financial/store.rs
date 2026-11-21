@@ -128,6 +128,7 @@ pub async fn history(
     owner: &str,
     deleted: bool,
     before: Option<i64>,
+    borrower: Option<&str>,
 ) -> Result<Vec<Activity>, Failure> {
     let rows: Vec<Entry> = if let Some(sequence) = before {
         let instant: i64 = sqlx::query_scalar(
@@ -139,11 +140,13 @@ pub async fn history(
         .await?
         .ok_or(Code::NotFound)?;
         sqlx::query_as(entries!(
-            "WHERE owner_id=? AND deleted=? AND (effective_at<? OR (effective_at=? AND sequence<?))
-            ORDER BY effective_at DESC,sequence DESC LIMIT 51"
+            "WHERE owner_id=? AND deleted=? AND (? IS NULL OR borrower_id=?)
+            AND (effective_at<? OR (effective_at=? AND sequence<?)) ORDER BY effective_at DESC,sequence DESC LIMIT 51"
         ))
         .bind(owner)
         .bind(deleted)
+        .bind(borrower)
+        .bind(borrower)
         .bind(instant)
         .bind(instant)
         .bind(sequence)
@@ -151,10 +154,13 @@ pub async fn history(
         .await?
     } else {
         sqlx::query_as(entries!(
-            "WHERE owner_id=? AND deleted=? ORDER BY effective_at DESC,sequence DESC LIMIT 51"
+            "WHERE owner_id=? AND deleted=? AND (? IS NULL OR borrower_id=?)
+            ORDER BY effective_at DESC,sequence DESC LIMIT 51"
         ))
         .bind(owner)
         .bind(deleted)
+        .bind(borrower)
+        .bind(borrower)
         .fetch_all(conn)
         .await?
     };

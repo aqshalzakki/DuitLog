@@ -467,9 +467,10 @@ pub(crate) async fn history(
     owner: &str,
     deleted: bool,
     before: Option<i64>,
+    borrower: Option<&str>,
 ) -> Result<Value, Failure> {
     let mut tx = db.begin().await?;
-    let mut items = store::history(&mut tx, owner, deleted, before).await?;
+    let mut items = store::history(&mut tx, owner, deleted, before, borrower).await?;
     tx.rollback().await?;
     let more = items.len() > 50;
     items.truncate(50);

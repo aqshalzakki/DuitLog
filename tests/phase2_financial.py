@@ -120,6 +120,15 @@ def financial_test(database, env, mail, port, origin):
     audit = alice.request("GET", "/audit", 200)["items"]
     assert any(any(item["automaticallyReactivated"] for item in log["details"]["borrowerChanges"]) for log in audit)
     check(alice.request("GET", borrower_path, 200)["status"], "PAID")
+    # Borrower history filter: only that borrower's activity, owner-scoped, deleted kept apart.
+    mine = alice.request("GET", "/activities?borrowerId=" + borrower_id, 200)
+    check([a["id"] for a in mine["items"]], [repay["resourceId"], loan["resourceId"]])
+    check(alice.request("GET", "/activities?borrowerId=" + second["resourceId"], 200)["items"], [])
+    check(bob.request("GET", "/activities?borrowerId=" + borrower_id, 200)["items"], [])
+    check(alice.request("GET", f"/activities?borrowerId={borrower_id}&before={mine['items'][0]['sequence']}", 200)["items"][0]["id"],
+          loan["resourceId"])
+    for bad in ("/activities?borrowerId=not-a-uuid", "/activities?deleted=maybe", "/audit?before=x"):
+        check(alice.request("GET", bad, 422)["code"], "VALIDATION_ERROR")  # API error shape, not plain text
 
     later = datetime.now(UTC).isoformat()
     future = (datetime.now(UTC) + timedelta(days=1)).isoformat()

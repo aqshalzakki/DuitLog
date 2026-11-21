@@ -1,15 +1,15 @@
-# Fase 5 · Product UX (slice 1–2)
+# Fase 5 · Product UX (slice 1–3)
 
 Slice ini mencakup SCR-05, SCR-06, SCR-09 (sebagian), SCR-10, SCR-11, SCR-19 dan SCR-21 (koreksi konflik). Rujukan: PR-BAL-01, PR-DASH-01/05/06/07/08, PR-TXN-01–08 (tanpa lampiran), PR-REC-01/03/04/09, PR-OFF-03–05, dan §6.4. **Fase 5 dan gate G4 belum selesai.**
 
 Slice 2 menambah Riwayat, detail, edit/hapus/restore, Baru dihapus, Kategori, dan Piutang (daftar peminjam).
+Slice 3 menambah Penyesuaian Saldo (SCR-16), Detail Peminjam (SCR-18), dan Audit (SCR-24). Rujukan: PR-BAL-02–04, PR-BAL-06, PR-REC-06/07, PR-HIS-08.
 
 Belum termasuk:
 - Pencarian dan filter Riwayat. Server belum menyediakan filter; daftar hanya dipaginasi per `sequence`.
-- Halaman detail per peminjam beserta riwayat piutangnya, dan ubah profil peminjam (endpoint sudah ada)
+- Ubah profil peminjam (endpoint sudah ada)
+- "Audit terkait" di Detail transaksi. Server belum bisa memfilter audit per resource.
 - Kategori default. Backend tidak menyemai kategori, padahal PRD memintanya.
-- Halaman Audit History (endpoint `/audit` sudah ada)
-- Balance Adjustment
 - Statistik periode, grafik, dan Reports
 - Draft persisten, lampiran, Settings (zona waktu, tema), dan Audit History
 - Bottom navigation mobile lima slot dan peringatan logout bila ada pending
@@ -35,6 +35,15 @@ Belum termasuk:
 | Ubah (`/add/<jenis>?edit=<id>`) | Form yang sama, jenis tetap. Hanya online. Data dimuat dari server, lalu `PATCH` dengan versi yang ditampilkan. Kategori atau peminjam yang sudah diarsipkan boleh tetap dipakai, tetapi tidak bisa dipilih baru. Waktu tetap instan asli kecuali diubah. `VERSION_CONFLICT` → "Muat versi terbaru". Edit yang sudah selesai dimuat ulang dari server saat halaman dibuka lagi. |
 | Kategori (`/categories`) | Tambah, ganti nama, arsip, aktifkan kembali. Hanya online. |
 | Piutang (`/borrowers`) | Total piutang, daftar peminjam dengan sisa dan Lunas/Belum lunas, dan tambah peminjam (lewat antrean vault bila terbuka). "Arsipkan" hanya untuk yang lunas; server tetap memutuskan (`BORROWER_OUTSTANDING`). "Aktifkan kembali" online. |
+
+| Penyesuaian (`/adjust`) | Hanya online, dibuka dari Beranda dan bukan dari Quick Add. Isinya target saldo (boleh Rp0 atau negatif), lalu ringkasan: saldo yang ditinjau, target, selisih, dan "waktu server saat disimpan". Tidak ada yang diterapkan sebelum "Simpan penyesuaian". Attempt dipakai ulang bila hasilnya belum diketahui. Gagal → target tidak ditampilkan seolah sudah diterapkan. |
+| Detail peminjam (`/borrowers/:id`) | Sisa piutang, Lunas/Belum lunas, kontak, dan riwayat pinjaman/pembayaran lewat `GET /activities?borrowerId=` dengan "Muat lagi". "Catat pinjaman" dan "Terima pembayaran" membuka form dengan peminjam sudah dipilih, hanya bila form itu belum diisi. Arsip hanya saat lunas; aktifkan kembali. Hanya online. |
+| Audit (`/audit`) | Urut menurut waktu aksi server. Label aksi, waktu WIB, aktor operator bila bukan pemilik, alasan, field yang berubah (sebelum → sesudah), saldo dan piutang sebelum → sesudah, perubahan selisih setiap titik saldo dengan "target tetap", reaktivasi peminjam otomatis, dan tautan ke transaksi. Kategori/peminjam yang berubah ditampilkan sebagai id. Hanya online. |
+
+Backend slice 3:
+- `GET /activities` menerima `borrowerId` (UUID, dibatasi owner, bisa digabung dengan `before` dan `deleted`).
+- Parameter query yang tidak valid di `/activities` dan `/audit` sekarang dijawab `422 VALIDATION_ERROR` dengan bentuk error API. Sebelumnya axum mengirim 400 berupa teks biasa.
+- Diuji di `phase2_financial.py`: hanya aktivitas peminjam itu, peminjam lain kosong, akun lain kosong, kursor, dan tiga query yang salah.
 
 **Usulan, dapat direview:** zona waktu akun belum ada di backend, jadi UI memakai Asia/Jakarta (UTC+7, default BRD) untuk input dan tampilan. Juga diusulkan: rute `/add/:kind` dan `/onboarding`, Beranda di `/`, serta teks label.
 
@@ -62,11 +71,21 @@ Belum termasuk:
 | Hapus ditolak | Menghapus pinjaman yang sudah dibayar membuat piutang negatif pada prefiks → ditolak, tidak ada yang berubah. |
 | Hapus dan pulihkan | Saldo dihitung ulang. Muncul di Baru dihapus. Pulihkan → waktu efektif dan nominal kembali, saldo kembali. |
 
+`tests/phase5_slice3.py` (slice 3):
+
+| Kasus | Hasil |
+| --- | --- |
+| Penyesuaian | Saldo awal Rp100.000. "abc" ditolak. Target 250.000 → ringkasan Rp250.000 dan selisih Rp150.000. Server belum berubah sebelum konfirmasi; sesudahnya saldo Rp250.000, snapshot ADJUSTMENT dengan delta 150.000. |
+| Mundur tanggal | Pemasukan Rp5.000 di antara saldo awal dan penyesuaian → saldo tetap Rp250.000. Audit menampilkan "Rp150.000 → Rp145.000 (target tetap)" dan saldo Rp250.000 → Rp250.000. Detail penyesuaian: target dan selisih Rp145.000, tanpa Hapus. |
+| Detail peminjam | Nama di Piutang → detail. "Catat pinjaman" → form dengan peminjam terpilih → simpan. Detail: sisa Rp20.000, satu baris riwayat (aktivitas lain tidak ikut), tanpa Arsipkan. |
+
 Suite penuh (`--financial --browser --offline`) dijalankan 5 kali: 4 lulus. 1 gagal di langkah logout suite vault Fase 4 (halaman `/account` kosong), bukan di slice ini. Penyebabnya belum ditemukan. Diagnosa susulan: tiga run penuh lagi dengan log jaringan dan browser semuanya lulus, jadi kegagalannya tidak terulang. `see()` sekarang mencatat error jaringan/log, `readyState`, dan isi `#app`, sehingga kegagalan berikutnya memuat penyebabnya. Kegagalan lain dalam run verifikasi slice 2 ternyata bug sungguhan:
-- Engine: `cycle(true)` dari simpan atau koreksi dibuang diam-diam bila tab yang sama sedang di tengah siklus. Item baru menunggu tick 30 detik, lebih lama dari batas tunggu tes. Sekarang ditandai dan dijalankan tepat setelah siklus itu. Ada kasus baru di `phase4_sync_client.py` yang gagal tanpa perbaikan ini dan lulus dengannya.
+- Engine: `cycle(true)` dari simpan atau koreksi dibuang diam-diam bila tab yang sama sedang di tengah siklus, sehingga item baru menunggu tick 30 detik. Sekarang ditandai dan dijalankan tepat setelah siklus itu. Ada kasus baru di `phase4_sync_client.py` yang gagal tanpa perbaikan ini dan lulus dengannya.
 - Riwayat: pindah ke Baru dihapus saat muatan pertama belum selesai menampilkan isi Riwayat biasa. Sekarang hanya permintaan terbaru yang mengisi daftar.
 
 Setelah kedua perbaikan, suite penuh dijalankan 3 kali dan semuanya lulus.
+
+Kegagalan Soft Lock tadi masih muncul sesekali, jadi penyebab yang diduga di atas ternyata keliru. Dengan diagnostik antrean dan isi server, penyebab sebenarnya terlihat: tes mengisi waktu koreksi "sekarang − 2 detik", dibulatkan ke detik. Kalau alur dari onboarding sampai koreksi lebih cepat dari itu, waktunya jatuh sebelum snapshot saldo awal dan transaksi terserap (delta saldo awal 777). Itu perilaku yang benar menurut BRD, tetapi salah sebagai uji koreksi. `past_now()` sekarang memilih detik lampau yang pasti setelah snapshot saldo awal. Sesudahnya suite UI lulus 8/8 dan suite penuh lulus 2/2.
 
 Error MySQL 1644 di log server berasal dari trigger `fixture_audit_reject` milik uji atomisitas Fase 2. Itu disengaja; log server hanya dicetak ulang saat suite gagal. Temuan sampingan: `Storage.overrideQuotaForOrigin` tidak berlaku di Chrome ini, sehingga kasus kuota di suite vault selalu "NOT RUN". Uji itu belum membuktikan penolakan kuota. Fixture sekarang mengosongkan `auth_rate_limits` sebelum suite browser karena gabungan suite melebihi batas 12 registrasi per IP. Uji UI juga mengembalikan jam uji ke waktu nyata di awal.
 

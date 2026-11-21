@@ -48,7 +48,9 @@ const sign = (row: Row) => (row.kind === 'DEDUCT' || row.kind === 'LOAN' ? '−'
         <strong data-receivables>{{ rupiah(state.receivables) }}</strong>
       </div>
     </div>
-    <p v-else-if="!finance.live" class="notice info">Saldo belum tersedia offline. Buka Akses Offline atau sambungkan ke internet.</p>
+    <p v-if="state && finance.live" class="hint"><RouterLink to="/adjust">Sesuaikan saldo</RouterLink> bila saldo
+      tercatat berbeda dengan kas sebenarnya.</p>
+    <p v-if="!state && !finance.live" class="notice info">Saldo belum tersedia offline. Buka Akses Offline atau sambungkan ke internet.</p>
     <p v-if="state && !finance.live" class="hint" data-cache-time>Data offline, terakhir diperbarui {{ formatTime(finance.snapshot!.at) }}.
       Saldo resmi mungkin sudah berubah.</p>
 

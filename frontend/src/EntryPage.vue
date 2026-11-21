@@ -35,6 +35,10 @@ function fresh(): Record<string, string | boolean> {
 }
 const draft = entries.draft(key, fresh)
 const f = draft.fields
+// From a borrower's page: preselect it on a form nobody has started.
+if (receivable && typeof route.query.borrower === 'string' && !f.borrower && !draft.op && !draft.queued) {
+  f.borrower = 's:' + route.query.borrower
+}
 
 const queuedItem = computed(() => sync.items.find((item) => item.clientActivityId === draft.queued))
 const pendingBorrowers = computed(() => sync.items.filter((item) => item.type === 'BORROWER' && item.state !== 'SYNCED'))

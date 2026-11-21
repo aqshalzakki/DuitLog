@@ -1,6 +1,6 @@
 use axum::{
     Json, Router,
-    extract::{DefaultBodyLimit, FromRequestParts, Path, Query, State},
+    extract::{DefaultBodyLimit, FromRequestParts, Path, Query, State, rejection::QueryRejection},
     http::{StatusCode, request::Parts},
     response::{IntoResponse, Response},
     routing::{get, post},
@@ -486,23 +486,27 @@ async fn integrity(State(state): State<AppState>, actor: Actor) -> Result<Json<V
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct History {
     #[serde(default)]
     deleted: bool,
     before: Option<i64>,
+    borrower_id: Option<Uuid>,
 }
 
 async fn history(
     State(state): State<AppState>,
     actor: Actor,
-    Query(filter): Query<History>,
+    filter: Result<Query<History>, QueryRejection>,
 ) -> Result<Json<Value>, Failure> {
+    let Query(filter) = filter.map_err(|_| Failure::from(Code::ValidationError))?;
     Ok(Json(
         financial::history(
             &state.auth.db,
             &actor.0.owner_id,
             filter.deleted,
             filter.before,
+            filter.borrower_id.map(|id| id.to_string()).as_deref(),
         )
         .await?,
     ))
@@ -567,8 +571,9 @@ struct AuditQuery {
 async fn audit(
     State(state): State<AppState>,
     actor: Actor,
-    Query(query): Query<AuditQuery>,
+    query: Result<Query<AuditQuery>, QueryRejection>,
 ) -> Result<Json<Value>, Failure> {
+    let Query(query) = query.map_err(|_| Failure::from(Code::ValidationError))?;
     Ok(Json(
         financial::audit_page(&state.auth.db, &actor.0.owner_id, query.before).await?,
     ))

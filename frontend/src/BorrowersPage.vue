@@ -87,7 +87,8 @@ const toggle = (b: Borrower) => run(b.id, `/borrowers/${b.id}/${b.archived ? 're
     <ul class="recent" data-borrowers>
       <li v-for="b in list" :key="b.id" :data-borrower="b.name">
         <div>
-          <strong>{{ b.name }}</strong>
+          <RouterLink v-if="online" :to="'/borrowers/' + b.id"><strong>{{ b.name }}</strong></RouterLink>
+          <strong v-else>{{ b.name }}</strong>
           <p>{{ b.status === 'PAID' ? 'Lunas' : 'Belum lunas' }}<template v-if="b.archived"> · Diarsipkan</template>
             <template v-if="b.phone"> · {{ b.phone }}</template><template v-if="b.notes"> · {{ b.notes }}</template></p>
         </div>

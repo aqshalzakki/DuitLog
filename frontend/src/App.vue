@@ -56,6 +56,7 @@ async function strongUnlock() {
       <template v-if="auth.profile">
         <RouterLink :to="auth.profile.emailVerified ? '/account' : '/verify-email'">Akun</RouterLink>
         <RouterLink to="/sessions">Perangkat</RouterLink>
+        <RouterLink v-if="auth.profile.emailVerified" to="/audit">Audit</RouterLink>
       </template>
     </nav>
   </header>

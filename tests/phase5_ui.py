@@ -44,6 +44,16 @@ def save(page):
     page.js("document.querySelector('#amount').form.requestSubmit()")
 
 
+def past_now(client):
+    """A real past second for the WIB time field that is still after the opening snapshot; one in the same
+    second or earlier would be absorbed by it (correct behaviour, wrong for a test of the fix)."""
+    opening = next(a for a in client.request("GET", "/activities", 200)["items"] if a["kind"] == "OPENING")
+    after = datetime.fromisoformat(opening["effectiveAt"])
+    while (moment := (datetime.now(UTC) - timedelta(seconds=1)).replace(microsecond=0)) <= after:
+        time.sleep(0.1)
+    return (moment + timedelta(hours=7)).strftime("%Y-%m-%dT%H:%M:%S")
+
+
 def kinds(client):
     items = client.request("GET", "/activities", 200)["items"]
     return [(a["kind"], a.get("amount"), a.get("title")) for a in items if a["kind"] != "OPENING"]
@@ -194,10 +204,16 @@ def ui_test(chrome, origin, api_port, mail):
         link(page, "Buka Sinkronisasi")
         link(page, "Perbaiki")
         page.see("location.pathname === '/add/deduct' && document.querySelector('#amount').value === '777'")
-        page.fill("#when", (datetime.now(UTC) + timedelta(hours=7) - timedelta(seconds=2)).strftime("%Y-%m-%dT%H:%M:%S"))
+        page.fill("#when", past_now(first))
         save(page)
         page.see("location.pathname === '/sync' && document.querySelectorAll('[data-state=CONFLICT]').length === 0")
-        wait_for(lambda: True if totals(first)[0] == 1300000 - 50000 - 777 else None)
+        try:
+            wait_for(lambda: True if totals(first)[0] == 1300000 - 50000 - 777 else None, 30)
+        except TimeoutError:
+            queue = page.js("window.__duitSync.items().then(l => l.map(i => [i.state, i.code, i.payload.effectiveAt, i.attemptId]))")
+            raise TimeoutError(f"corrected item not applied; queue {queue}; sync {page.js('window.__duitSync.state()')}; "
+                               f"totals {totals(first)}; server {[(x['kind'], x.get('amount'), x['effectiveAt'], x.get('snapshotDelta')) for x in first.request('GET', '/activities', 200)['items']]}; "
+                               f"real {datetime.now(UTC).isoformat()}")
         print("Soft Lock mid-form: page unmounted, input kept after PIN; a fast device clock gives a future-time "
               "conflict, fixed by editing the time", flush=True)
 
@@ -212,7 +228,7 @@ def ui_test(chrome, origin, api_port, mail):
         page.see("location.pathname === '/add/deduct' && !!document.querySelector('nav a')")
         page.fill("#amount", "3000")
         # The test clock is still 5 minutes ahead, so give the real time explicitly.
-        page.fill("#when", (datetime.now(UTC) + timedelta(hours=7) - timedelta(seconds=2)).strftime("%Y-%m-%dT%H:%M:%S"))
+        page.fill("#when", past_now(first))
         save(page)
         result(page, "Transaksi tersimpan offline")
     with chrome.run() as page:
