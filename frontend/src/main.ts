@@ -9,6 +9,10 @@ import SyncPage from './SyncPage.vue'
 import DashboardPage from './DashboardPage.vue'
 import EntryPage from './EntryPage.vue'
 import OnboardingPage from './OnboardingPage.vue'
+import HistoryPage from './HistoryPage.vue'
+import ActivityPage from './ActivityPage.vue'
+import BorrowersPage from './BorrowersPage.vue'
+import CategoriesPage from './CategoriesPage.vue'
 import { useEntries, useFinance } from './finance'
 import { useSync } from './sync/engine'
 import { useAuth } from './session'
@@ -22,6 +26,10 @@ const router = createRouter({
     { path: '/', name: 'home', component: DashboardPage, meta: { offline: true } },
     { path: '/onboarding', name: 'onboarding', component: OnboardingPage, meta: { session: true, verified: true } },
     { path: '/add/:kind(increase|deduct|loan|repayment)', name: 'add', component: EntryPage, meta: { offline: true } },
+    { path: '/history', name: 'history', component: HistoryPage, meta: { offline: true } },
+    { path: '/activity/:id', name: 'activity', component: ActivityPage, meta: { session: true, verified: true } },
+    { path: '/borrowers', name: 'borrowers', component: BorrowersPage, meta: { offline: true } },
+    { path: '/categories', name: 'categories', component: CategoriesPage, meta: { offline: true } },
     { path: '/login', name: 'login', component: AuthPage },
     { path: '/register', name: 'register', component: AuthPage },
     { path: '/forgot-password', name: 'forgot', component: AuthPage },

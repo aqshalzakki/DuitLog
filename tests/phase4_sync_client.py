@@ -166,6 +166,20 @@ def sync_client_test(chrome, origin, api_port, mail):
         check(totals(client), (start[0] - 2, start[1]))
         print("Lost response: committed batch, failed response, lookup marks SYNCED with no resend", flush=True)
 
+        # A save while this tab is mid-cycle goes out right after that cycle, not at the next 30 s tick.
+        start = totals(client)
+        page.cdp("Fetch.enable", patterns=[{"urlPattern": URL, "requestStage": "Request"}])
+        held = []
+        first = add(page, "INCREASE", 3, at(7.4))
+        intercept(page, held.append, lambda: held)
+        second = add(page, "INCREASE", 4, at(7.6))
+        page.cdp("Fetch.continueRequest", requestId=held[0]["requestId"])
+        intercept(page, lambda e: page.cdp("Fetch.continueRequest", requestId=e["requestId"]),
+                  lambda: states(page, first, second) == ("SYNCED", "SYNCED"), timeout=5)
+        page.cdp("Fetch.disable")
+        check(totals(client), (start[0] + 7, start[1]))
+        print("Save during a running cycle: queued again and sent right after it", flush=True)
+
         # Crash mid-send: the request never leaves, the page reloads, the same attempt is resent once.
         network(page, False)
         crash = add(page, "INCREASE", 7, at(8))

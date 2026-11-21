@@ -33,6 +33,9 @@ class Page:
                 self.paused.append(reply["params"])
             elif reply.get("method") == "Network.requestWillBeSent" and reply["params"]["request"]["url"].endswith("/sync/items"):
                 self.sent.append(json.loads(reply["params"]["request"].get("postData") or "{}"))
+            elif reply.get("method") == "Log.entryAdded" and reply["params"]["entry"]["level"] == "error":
+                entry = reply["params"]["entry"]
+                self.errors.append(f"{entry.get('source')}: {entry.get('text')} {entry.get('url', '')}")
             elif reply.get("method") == "Runtime.exceptionThrown":
                 self.errors.append(reply["params"]["exceptionDetails"].get("exception", {}).get("description"))
             elif reply.get("method") == "Runtime.consoleAPICalled" and reply["params"]["type"] == "error":
@@ -52,8 +55,9 @@ class Page:
         try:
             wait_for(lambda: True if self.js(expression) else None, timeout)
         except TimeoutError:
-            state = self.js("({ path: location.pathname, status: document.querySelector('[data-vault-status]')?.dataset.vaultStatus,"
-                            " text: document.querySelector('main')?.innerText.slice(0, 400) })")
+            state = self.js("({ path: location.pathname, ready: document.readyState, status: document.querySelector('[data-vault-status]')?.dataset.vaultStatus,"
+                            " text: document.querySelector('main')?.innerText.slice(0, 400) ?? null,"
+                            " app: document.querySelector('#app')?.innerHTML.length ?? null })")
             probe = self.js("""indexedDB.databases().then(list => Promise.all(list.map(d => new Promise(done => {
               const r = indexedDB.open(d.name); const t = setTimeout(() => done(d.name + ': open hangs'), 3000);
               r.onblocked = () => done(d.name + ': blocked');
@@ -127,6 +131,7 @@ class Chrome:
         page = Page(target["webSocketDebuggerUrl"])
         page.cdp("Page.enable")
         page.cdp("Runtime.enable")
+        page.cdp("Log.enable")
         page.cdp("Page.addScriptToEvaluateOnNewDocument", source=CLOCK)
         page.cdp("Network.enable")
         page.cdp("Network.setBlockedURLs", urls=["*/api/v1/*"] if blocked else [])
@@ -261,6 +266,8 @@ def offline_test(browser, env, origin, api_port, work, mail):
         sync_client_test(chrome, origin, api_port, mail)
         from phase5_ui import ui_test
         ui_test(chrome, origin, api_port, mail)
+        from phase5_manage import manage_test
+        manage_test(chrome, origin, api_port, mail)
 
 
 def run(chrome, origin, api_port, mail):

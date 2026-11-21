@@ -60,6 +60,7 @@ export const useFinance = defineStore('finance', () => {
 /** One online write without a vault. Its ids live in Pinia so a remount never makes a second activity. */
 export type Op = {
   path: string
+  method: string
   clientActivityId: string
   attemptId: string
   body: Record<string, unknown>
@@ -68,8 +69,8 @@ export type Op = {
   result?: { resourceId?: string; status?: string; code?: string }
 }
 
-export const newOp = (path: string): Op => ({
-  path, clientActivityId: crypto.randomUUID(), attemptId: crypto.randomUUID(), body: {}, state: 'idle',
+export const newOp = (path: string, method = 'POST'): Op => ({
+  path, method, clientActivityId: crypto.randomUUID(), attemptId: crypto.randomUUID(), body: {}, state: 'idle',
 })
 
 function settle(op: Op, code: string | undefined) {
@@ -88,7 +89,7 @@ export async function send(op: Op, lookup = true) {
   op.state = 'sending'
   op.code = undefined
   try {
-    op.result = await auth.authorized(op.path, 'POST',
+    op.result = await auth.authorized(op.path, op.method,
       { attemptId: op.attemptId, clientActivityId: op.clientActivityId, ...op.body }, AbortSignal.timeout(20_000))
     op.state = 'confirmed'
   } catch (failure) {

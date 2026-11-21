@@ -4,7 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { check, newOp, send, useEntries, useFinance } from './finance'
 import { REASONS } from './messages'
 import { KINDS, instant, localInput, parseAmount, rupiah } from './money'
-import { useAuth } from './session'
+import { ApiError, useAuth } from './session'
 import { SyncError, useSync } from './sync/engine'
 import { VaultError, useVault } from './vault/store'
 
@@ -20,7 +20,8 @@ const entries = useEntries()
 const kind = KIND_BY_PATH[route.params.kind as string] ?? 'INCREASE'
 const receivable = kind === 'LOAN' || kind === 'REPAYMENT'
 const fixId = typeof route.query.fix === 'string' ? route.query.fix : undefined
-const key = fixId ? 'fix:' + fixId : kind
+const editId = typeof route.query.edit === 'string' ? route.query.edit : undefined
+const key = fixId ? 'fix:' + fixId : editId ? 'edit:' + editId : kind
 const busy = ref(false)
 const failure = ref('')
 const errors = ref<Record<string, string>>({})
@@ -37,8 +38,9 @@ const f = draft.fields
 
 const queuedItem = computed(() => sync.items.find((item) => item.clientActivityId === draft.queued))
 const pendingBorrowers = computed(() => sync.items.filter((item) => item.type === 'BORROWER' && item.state !== 'SYNCED'))
-const borrowers = computed(() => (finance.snapshot?.borrowers ?? []).filter((b) => !b.archived))
-const categories = computed(() => (finance.snapshot?.categories ?? []).filter((c) => !c.archived))
+// An edit may keep the archived borrower or category it already has; nothing archived can be newly chosen.
+const borrowers = computed(() => (finance.snapshot?.borrowers ?? []).filter((b) => !b.archived || 's:' + b.id === f.kept))
+const categories = computed(() => (finance.snapshot?.categories ?? []).filter((c) => !c.archived || c.id === f.kept))
 const chosen = computed(() => borrowers.value.find((b) => 's:' + b.id === f.borrower))
 const locked = computed(() => busy.value || !!draft.queued || (!!draft.op && draft.op.state !== 'rejected'))
 
@@ -58,7 +60,31 @@ onMounted(async () => {
     }
     draft.loaded = true
   }
+  // A finished edit starts over from the server's current version; an unfinished one survives a Soft Lock.
+  if (editId && (!draft.loaded || draft.op?.state === 'confirmed')) await loadEdit()
 })
+
+/** Confirmed activity edit: online only, against the version shown. */
+async function loadEdit() {
+  failure.value = ''
+  try {
+    const a = await auth.authorized<Record<string, any>>('/activities/' + editId) // eslint-disable-line @typescript-eslint/no-explicit-any
+    if (a.kind !== kind || a.deleted) {
+      failure.value = 'Transaksi ini tidak dapat diubah di sini.'
+      return
+    }
+    const borrower = a.borrowerId ? 's:' + a.borrowerId : ''
+    Object.assign(f, {
+      amount: a.amount, when: localInput(Date.parse(a.effectiveAt)), whenSet: false, original: a.effectiveAt,
+      title: a.title ?? '', description: a.description ?? '', categoryId: a.categoryId ?? '', borrower,
+      affect: a.affectCashBalance !== false, version: a.version, kept: borrower || a.categoryId || '',
+    })
+    draft.op = undefined
+    draft.loaded = true
+  } catch (error) {
+    failure.value = error instanceof ApiError && error.status === 404 ? 'Transaksi tidak ditemukan.' : 'Transaksi gagal dimuat.'
+  }
+}
 
 function fields() {
   const next: Record<string, string> = {}
@@ -102,6 +128,14 @@ async function save() {
       await sync.correct(fixId, body)
       entries.reset(key)
       await router.push('/sync')
+    } else if (editId) {
+      if (!online.value) failure.value = 'Mengubah transaksi tercatat hanya bisa saat online.'
+      else if (draft.loaded) {
+        draft.op ??= newOp('/activities/' + editId, 'PATCH')
+        draft.op.body = { expectedVersion: f.version, ...body }
+        await send(draft.op)
+        if (draft.op.state === 'confirmed') void finance.load()
+      }
     } else if (viaVault.value) {
       draft.queued = await sync.enqueue('ACTIVITY', body)
     } else if (online.value) {
@@ -138,7 +172,7 @@ async function addBorrower() {
   busy.value = true
   failure.value = ''
   try {
-    if (viaVault.value) {
+    if (viaVault.value && !editId) { // an edit needs a server borrower id
       f.borrower = 'c:' + await sync.enqueue('BORROWER', { name })
     } else if (online.value) {
       if (!draft.borrowerOp || draft.borrowerOp.state === 'confirmed') draft.borrowerOp = newOp('/borrowers')
@@ -186,6 +220,9 @@ const result = computed(() => {
   }
   const op = draft.op
   if (!op || op.state === 'idle' || op.state === 'sending') return undefined
+  if (op.state === 'confirmed' && editId) {
+    return { tone: 'success', title: 'Perubahan tersimpan', text: 'Saldo, piutang, dan selisih snapshot sesudahnya sudah dihitung ulang.' }
+  }
   if (op.state === 'confirmed') return { tone: 'success', title: 'Transaksi berhasil dicatat', text: op.code ? REASONS[op.code] : 'Saldo resmi sudah diperbarui.' }
   if (op.state === 'checking') return { tone: 'info', title: 'Memeriksa hasil transaksi', text: 'Respons tidak sampai. Jangan catat ulang; periksa hasilnya.' }
   return { tone: 'error', title: 'Transaksi belum dapat disimpan', text: REASONS[op.code ?? ''] ?? 'Periksa isian lalu simpan lagi.' }
@@ -195,7 +232,7 @@ const done = computed(() => !!draft.queued || draft.op?.state === 'confirmed')
 
 <template>
   <section class="card account-card" aria-labelledby="page-title" :data-entry-kind="kind">
-    <h1 id="page-title">{{ fixId ? 'Perbaiki ' : '' }}{{ KINDS[kind] }}</h1>
+    <h1 id="page-title">{{ fixId ? 'Perbaiki ' : editId ? 'Ubah ' : '' }}{{ KINDS[kind] }}</h1>
     <p v-if="failure" class="notice error" role="alert">{{ failure }}</p>
     <div role="status" aria-live="polite">
       <div v-if="result" class="notice" :class="result.tone" data-entry-result>
@@ -261,15 +298,18 @@ const done = computed(() => !!draft.queued || draft.op?.state === 'confirmed')
           <label for="description">Deskripsi</label>
           <textarea id="description" v-model="f.description" rows="3" maxlength="1000"></textarea>
         </details>
-        <button class="primary">{{ fixId ? 'Simpan perbaikan' : 'Simpan' }}</button>
+        <button class="primary">{{ fixId ? 'Simpan perbaikan' : editId ? 'Simpan perubahan' : 'Simpan' }}</button>
       </fieldset>
     </form>
 
     <div class="actions">
       <button v-if="draft.op?.state === 'checking'" type="button" class="secondary" :disabled="busy" @click="recheck">Periksa hasil</button>
       <RouterLink v-if="queuedItem && queuedItem.state !== 'SYNCED'" to="/sync">Buka Sinkronisasi</RouterLink>
-      <button v-if="done" type="button" class="secondary" @click="again">Catat lagi</button>
-      <RouterLink v-if="done" to="/">Ke Beranda</RouterLink>
+      <button v-if="editId && draft.op?.code === 'VERSION_CONFLICT'" type="button" class="secondary" :disabled="busy"
+        @click="loadEdit">Muat versi terbaru</button>
+      <RouterLink v-if="editId" :to="'/activity/' + editId">Kembali ke detail</RouterLink>
+      <button v-if="done && !editId" type="button" class="secondary" @click="again">Catat lagi</button>
+      <RouterLink v-if="done && !editId" to="/">Ke Beranda</RouterLink>
     </div>
   </section>
 </template>

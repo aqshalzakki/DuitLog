@@ -154,6 +154,7 @@ export const useSync = defineStore('sync', () => {
   const error = ref('')
   let cooldownUntil = 0
   let failures = 0
+  let again = false // a manual cycle asked for while this tab is mid-cycle runs right after it
 
   async function withLock(owner: string, ifAvailable: boolean, work: () => Promise<void>) {
     // Without Web Locks, server idempotency is still the final duplicate guard.
@@ -303,6 +304,10 @@ export const useSync = defineStore('sync', () => {
   /** One cycle: at most MAX_ATTEMPTS passes with backoff. Only one tab per owner runs it. */
   async function cycle(manual = false) {
     if (!canSync() || (!manual && Date.now() < cooldownUntil)) return
+    if (running.value) {
+      if (manual) again = true // its items may have been read before the new one was saved
+      return
+    }
     const owner = vault.owner!
     await withLock(owner, true, async () => {
       running.value = true
@@ -325,6 +330,10 @@ export const useSync = defineStore('sync', () => {
         await refresh()
       }
     })
+    if (again) {
+      again = false
+      void cycle(true)
+    }
   }
 
   async function enqueue(type: Kind, fields: Record<string, unknown>, dependsOn: string[] = []) {

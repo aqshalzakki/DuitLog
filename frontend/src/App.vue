@@ -47,6 +47,9 @@ async function strongUnlock() {
     <nav v-if="auth.profile || offline" aria-label="Utama">
       <template v-if="auth.profile?.emailVerified || offline">
         <RouterLink to="/">Beranda</RouterLink>
+        <RouterLink to="/history">Riwayat</RouterLink>
+        <RouterLink to="/borrowers">Piutang</RouterLink>
+        <RouterLink to="/categories">Kategori</RouterLink>
         <RouterLink to="/sync">Sinkronisasi</RouterLink>
         <RouterLink to="/offline">Offline</RouterLink>
       </template>

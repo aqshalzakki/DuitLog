@@ -71,12 +71,13 @@ const sign = (row: Row) => (row.kind === 'DEDUCT' || row.kind === 'LOAN' ? '−'
     <ul v-else-if="recent" class="recent">
       <li v-for="row in recent" :key="row.id">
         <div>
-          <strong>{{ row.title || KINDS[row.kind] }}</strong>
+          <RouterLink :to="'/activity/' + row.id"><strong>{{ row.title || KINDS[row.kind] }}</strong></RouterLink>
           <p>{{ KINDS[row.kind] }} · {{ formatTime(row.effectiveAt) }}<template v-if="row.affectCashBalance === false"> · Tidak memengaruhi saldo</template></p>
         </div>
         <span>{{ row.amount ? sign(row) + rupiah(row.amount) : rupiah(row.targetBalance) }}</span>
       </li>
     </ul>
+    <RouterLink v-if="finance.live" to="/history">Lihat semua riwayat</RouterLink>
     <p v-if="vault.status === 'hard'" class="hint"><RouterLink to="/offline">Buka Akses Offline</RouterLink> untuk melihat antrean di perangkat ini.</p>
   </section>
 </template>

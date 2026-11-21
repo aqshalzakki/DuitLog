@@ -17,5 +17,9 @@ export const REASONS: Record<string, string> = {
   EXPIRED: 'Validasi online diperlukan.',
   OPENING_ALREADY_DECIDED: 'Saldo awal sudah ditentukan.',
   NOT_FOUND: 'Data tidak ditemukan.',
+  VERSION_CONFLICT: 'Data telah berubah di perangkat lain. Muat ulang versi terbaru.',
+  INVALID_ACTIVITY_STATE: 'Tindakan ini tidak berlaku untuk transaksi dalam keadaan sekarang.',
+  BORROWER_OUTSTANDING: 'Peminjam masih memiliki piutang. Arsip hanya untuk yang sudah lunas.',
+  INVALID_AMOUNT: 'Nominal harus Rupiah bulat lebih dari Rp0.',
   STORAGE: 'Tidak dapat menyimpan di perangkat. Tidak ada yang tersimpan.',
 }
