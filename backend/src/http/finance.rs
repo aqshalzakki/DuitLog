@@ -34,6 +34,7 @@ pub(super) fn routes() -> Router<AppState> {
         .route("/categories/{id}", axum::routing::patch(edit_category))
         .route("/categories/{id}/{action}", post(category_action))
         .route("/audit", get(audit))
+        .route("/settings/timezone", axum::routing::put(set_timezone))
         .route("/reports/{family}", get(report))
         .route("/operations/{id}", get(lookup))
         .route(
@@ -479,6 +480,22 @@ async fn state(State(state): State<AppState>, actor: Actor) -> Result<Json<Value
     ))
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TimezoneBody {
+    timezone: String,
+}
+
+async fn set_timezone(
+    State(state): State<AppState>,
+    actor: Actor,
+    Input(body): Input<TimezoneBody>,
+) -> Result<Json<Value>, Failure> {
+    Ok(Json(
+        financial::set_timezone(&state.auth.db, &actor.0.owner_id, &body.timezone).await?,
+    ))
+}
+
 async fn integrity(State(state): State<AppState>, actor: Actor) -> Result<Json<Value>, Failure> {
     let value = financial::view_state(&state.auth.db, &actor.0.owner_id).await?;
     Ok(Json(
@@ -593,16 +610,11 @@ async fn report(
     };
     let (from, to) = if period == financial::report::Period::Custom {
         (
-            date(query.from.as_ref())?.ok_or_else(invalid)?,
+            Some(date(query.from.as_ref())?.ok_or_else(invalid)?),
             date(query.to.as_ref())?,
         )
     } else {
-        let today = time::OffsetDateTime::now_utc()
-            .to_offset(
-                time::UtcOffset::from_whole_seconds(7 * 3600).map_err(|_| Failure::Internal)?,
-            )
-            .date();
-        (date(query.date.as_ref())?.unwrap_or(today), None)
+        (date(query.date.as_ref())?, None)
     };
     Ok(Json(
         financial::report(&state.auth.db, &actor.0.owner_id, &family, period, from, to).await?,

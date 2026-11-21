@@ -184,6 +184,7 @@ def financial_test(database, env, mail, port, origin):
     operation(alice, "/activities", input_a, status=423, code="FINANCIAL_INTEGRITY_FROZEN")
     # An unverified ledger gives no official report.
     check(alice.request("GET", "/reports/balance-movement?period=month", 423)["code"], "FINANCIAL_INTEGRITY_FROZEN")
+    check(alice.request("PUT", "/settings/timezone", 423, data={"timezone": "UTC"})["code"], "FINANCIAL_INTEGRITY_FROZEN")
     check(alice.request("GET", "/integrity-status", 200), {"frozen": True, "recoveryActive": False})
     check(operation(bob, "/activities", input_a)["balance"], "-14")
     operator = ROOT / "target/debug/finance_operator.exe"
@@ -204,6 +205,7 @@ def financial_test(database, env, mail, port, origin):
     use_db(database, "UPDATE financial_recovery SET active=TRUE WHERE id=1;")
     operation(alice, "/activities", input_a, status=503, code="FINANCIAL_RECOVERY_ACTIVE")
     operation(bob, "/activities", input_a, status=503, code="FINANCIAL_RECOVERY_ACTIVE")
+    check(bob.request("PUT", "/settings/timezone", 503, data={"timezone": "UTC"})["code"], "FINANCIAL_RECOVERY_ACTIVE")
     check(alice.request("GET", "/operations/" + blocked["attemptId"], 200), accepted)
     check(alice.request("GET", "/integrity-status", 200), {"frozen": False, "recoveryActive": True})
     check(database.rows(f"USE {DB}; SELECT COUNT(*) FROM financial_accounts WHERE owner_id IN ('{aid}','{bid}');"), ["2"])
@@ -262,7 +264,30 @@ def report_test(alice, bob):
                 "receivables?period=day&date=2021-3-1"):
         check(bob.request("GET", "/reports/" + bad, 422)["code"], "VALIDATION_ERROR")
     bob.request("GET", "/reports/unknown?period=day", 404)
+
+    # BR-RPT-11: a zone change regroups days but never touches instants, balances or the other owner.
+    history, state = bob.request("GET", "/activities", 200), bob.request("GET", "/financial-state", 200)
+    check(state["timezone"], "Asia/Jakarta")
+    check(bob.request("PUT", "/settings/timezone", 200, data={"timezone": "UTC"}), {"timezone": "UTC"})
+    utc = bob.request("GET", "/reports/income-expense?period=day&date=2021-03-10", 200)
+    check((utc["timezone"], utc["range"]["start"], utc["current"]), ("UTC", "2021-03-10T00:00:00Z",
+          {"income": "1500", "expense": "0", "net": "1500"}))  # 17:00Z moved back to 10 March
+    check(bob.request("GET", "/activities", 200), history)
+    after = bob.request("GET", "/financial-state", 200)
+    check((after["timezone"], after["balance"], after["financialStateVersion"]), ("UTC", state["balance"], state["financialStateVersion"]))
+    check(alice.request("GET", "/financial-state", 200)["timezone"], "Asia/Jakarta")
+    entry = bob.request("GET", "/audit", 200)["items"][0]
+    check((entry["action"], entry["details"]), ("TIMEZONE_CHANGED", {"before": {"timezone": "Asia/Jakarta"}, "after": {"timezone": "UTC"}}))
+    bob.request("PUT", "/settings/timezone", 200, data={"timezone": "UTC"})  # unchanged: no second entry
+    check(bob.request("GET", "/audit", 200)["items"][0]["id"], entry["id"])
+    for bad in ({"timezone": "Mars/Olympus"}, {"timezone": ""}, {"timezone": "x" * 65}):
+        check(bob.request("PUT", "/settings/timezone", 422, data=bad)["code"], "VALIDATION_ERROR")
+    bob.request("PUT", "/settings/timezone", 200, data={"timezone": "America/New_York"})
+    march = bob.request("GET", "/reports/income-expense?period=month&date=2021-03-01", 200)
+    dst = bob.request("GET", "/reports/income-expense?period=day&date=2021-03-14", 200)["range"]  # spring forward
+    check((len(march["series"]), dst["start"], dst["end"]), (31, "2021-03-14T05:00:00Z", "2021-03-15T04:00:00Z"))
+    bob.request("PUT", "/settings/timezone", 200, data={"timezone": "Asia/Jakarta"})
     reconcile(alice)
     reconcile(bob)
     print("Reports: WIB day boundary, income/expense excludes receivables and deleted, balance movement and "
-          "receivables reconcile with the core, comparison states, owner isolation, freeze refuses", flush=True)
+          "receivables reconcile with the core, comparison states, owner isolation, freeze refuses; timezone change regroups days (UTC, DST) without touching instants, audited", flush=True)

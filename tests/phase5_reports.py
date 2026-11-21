@@ -86,3 +86,64 @@ def reports_test(chrome, origin, api_port, mail):
         page.see("!!document.querySelector('[data-report-summary]')")
         print("Reports offline (AC-20): online-only message, no cached official figures", flush=True)
         logout(page, origin)
+
+
+def settings_test(chrome, origin, api_port, mail):
+    """SCR-23: theme Light/Dark/System per device, and the account timezone with its warning (PR-RPT-10,
+    PR-SET-01/02): after confirming, report days regroup and the audit shows the change."""
+    client, email = user(api_port, origin, mail, "ui-settings")
+    operation(client, "/onboarding/skip-opening-balance")
+    operation(client, "/activities", activity("INCREASE", 500, "2021-03-10T17:00:00Z"))  # 11 March WIB, 10 March UTC
+
+    with chrome.run() as page:
+        page.go(origin + "/login")
+        page.see("!!document.querySelector('#email')")
+        login(page, origin, email)
+        link(page, "Pengaturan")
+        page.see("!!document.querySelector('#zone')")
+        page.js("document.querySelector('input[value=dark]').click()")
+        page.see("document.documentElement.dataset.theme === 'dark'")
+        check(page.js("[localStorage.getItem('duit-theme'), getComputedStyle(document.body).backgroundColor]"),
+              ["dark", "rgb(17, 22, 18)"])
+        page.js("document.querySelector('input[value=system]').click()")
+        page.see("!document.documentElement.hasAttribute('data-theme') && localStorage.getItem('duit-theme') === null")
+        print("Settings UI: Light/Dark/System applied and stored per device", flush=True)
+
+        text(page, "[data-current-zone]", "Asia/Jakarta")
+        select(page, "#zone", "UTC")
+        page.submit("#zone")
+        text(page, "[data-zone-warning]", "Waktu transaksi yang tersimpan, saldo, dan piutang tidak berubah")
+        check(client.request("GET", "/financial-state", 200)["timezone"], "Asia/Jakarta")  # nothing saved yet
+        page.click("Ya, ubah zona waktu")
+        text(page, "[data-current-zone]", "UTC")
+        check(client.request("GET", "/financial-state", 200)["timezone"], "UTC")
+
+        link(page, "Laporan")
+        page.see("!!document.querySelector('#period')")
+        select(page, "#period", "day")
+        page.fill("#date", "2021-03-10")
+        page.submit("#date")
+        text(page, "[data-income]", "Rp500")
+        link(page, "Audit")
+        page.see("document.body.textContent.includes('Zona waktu akun diubah')")
+        print("Settings UI: timezone change needs confirmation, regroups report days, shows in audit", flush=True)
+
+        # Cold loads: the zone arrives after the page is set up. Tokyo has no DST, New York is behind WIB.
+        client.request("PUT", "/settings/timezone", 200, data={"timezone": "Asia/Tokyo"})
+        page.go(origin + "/add/increase")
+        page.see("document.querySelector('label[for=when]')?.textContent.includes('Asia/Tokyo')")
+        page.see("[0, 60e3].map(d => new Date(Date.now() + 9 * 3600e3 - d).toISOString().slice(0, 16))"
+                 ".includes(document.querySelector('#when').value)")
+        page.fill("#amount", "7")
+        page.submit("#amount")
+        page.see("document.body.textContent.includes('Transaksi berhasil dicatat')")
+        latest = client.request("GET", "/activities", 200)["items"][0]
+        check((latest["amount"], abs(datetime.fromisoformat(latest["effectiveAt"]) - datetime.now(UTC)).total_seconds() < 120),
+              ("7", True))
+        client.request("PUT", "/settings/timezone", 200, data={"timezone": "America/New_York"})
+        page.go(origin + "/reports")
+        page.see("!!document.querySelector('[data-report-summary]')")
+        check(page.js("document.querySelector('#date').value === new Intl.DateTimeFormat('en-CA', "
+                      "{ timeZone: 'America/New_York' }).format(new Date())"), True)
+        print("Settings UI: cold-loaded form and report use the account zone (Tokyo prefill, New York today)", flush=True)
+        logout(page, origin)

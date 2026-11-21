@@ -304,7 +304,7 @@ def main(browser, finance=False, offline=False):
             api = ROOT / "target/debug/api.exe"
             for _ in range(2):
                 subprocess.run([api, "migrate"], env=env, check=True, timeout=30)
-            check(database.rows(f"USE {DB}; SELECT version FROM _sqlx_migrations WHERE success=1 ORDER BY version;"), ["1", "2"])
+            check(database.rows(f"USE {DB}; SELECT version FROM _sqlx_migrations WHERE success=1 ORDER BY version;"), ["1", "2", "3"])
             print("MySQL migration and repeat application OK", flush=True)
             client = Client(api_port, origin)
             with process([api], env, work / "api.log"):

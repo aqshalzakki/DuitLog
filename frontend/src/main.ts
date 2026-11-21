@@ -17,12 +17,15 @@ import AdjustmentPage from './AdjustmentPage.vue'
 import BorrowerPage from './BorrowerPage.vue'
 import AuditPage from './AuditPage.vue'
 import ReportsPage from './ReportsPage.vue'
+import SettingsPage from './SettingsPage.vue'
+import { applyTheme, savedTheme } from './theme'
 import { useEntries, useFinance } from './finance'
 import { useSync } from './sync/engine'
 import { useAuth } from './session'
 import { enrolledOwner, useVault } from './vault/store'
 import './style.css'
 
+applyTheme(savedTheme())
 const pinia = createPinia()
 const router = createRouter({
   history: createWebHistory(),
@@ -37,6 +40,7 @@ const router = createRouter({
     { path: '/adjust', name: 'adjust', component: AdjustmentPage, meta: { session: true, verified: true } },
     { path: '/reports', name: 'reports', component: ReportsPage, meta: { session: true, verified: true } },
     { path: '/audit', name: 'audit', component: AuditPage, meta: { session: true, verified: true } },
+    { path: '/settings', name: 'settings', component: SettingsPage, meta: { offline: true } },
     { path: '/categories', name: 'categories', component: CategoriesPage, meta: { offline: true } },
     { path: '/login', name: 'login', component: AuthPage },
     { path: '/register', name: 'register', component: AuthPage },

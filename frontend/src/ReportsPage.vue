@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { localInput, rupiah } from './money'
+import { useFinance } from './finance'
+import { accountZone, localInput, rupiah } from './money'
 import { type Change, type Period, type Range, PERIODS, biggest, changeText, dateLabel, fetchReport, rangeLabel,
   reportError, share } from './report'
 
@@ -26,12 +27,13 @@ type Family = keyof typeof FAMILIES
 
 const route = useRoute()
 const router = useRouter()
-const today = localInput().slice(0, 10)
+const finance = useFinance()
+const today = ref(localInput().slice(0, 10))
 const family = computed<Family>(() => (route.query.family as Family) in FAMILIES ? route.query.family as Family : 'income-expense')
 const period = ref<Period>('month')
-const date = ref(today)
-const from = ref(today)
-const to = ref(today)
+const date = ref(today.value)
+const from = ref(today.value)
+const to = ref(today.value)
 const busy = ref(false)
 const error = ref('')
 const data = ref<IncomeExpense | Movement | Receivables>()
@@ -66,7 +68,15 @@ async function load() {
   }
 }
 
-onMounted(load)
+onMounted(async () => {
+  await finance.load() // "today" must be the account zone's, or a zone behind Jakarta gets a future date
+  const before = today.value
+  today.value = localInput().slice(0, 10)
+  if (date.value === before) date.value = today.value // only dates nobody changed meanwhile
+  if (from.value === before) from.value = today.value
+  if (to.value === before) to.value = today.value
+  await load()
+})
 watch(family, () => {
   data.value = undefined
   void load()
@@ -78,7 +88,7 @@ const pick = (next: Family) => router.replace({ query: { ...route.query, family:
   <section class="card account-card" aria-labelledby="page-title">
     <h1 id="page-title">Laporan</h1>
     <p class="intro">Hanya transaksi terkonfirmasi di server. Item yang belum tersinkron dan transaksi terhapus tidak
-      termasuk. Tanggal mengikuti zona waktu Asia/Jakarta (WIB).</p>
+      termasuk. Tanggal mengikuti zona waktu akun {{ accountZone() }}.</p>
     <nav class="tabs" aria-label="Jenis laporan">
       <button v-for="(name, key) in FAMILIES" :key="key" type="button" :aria-pressed="family === key"
         :class="family === key ? 'primary' : 'secondary'" @click="pick(key)">{{ name }}</button>

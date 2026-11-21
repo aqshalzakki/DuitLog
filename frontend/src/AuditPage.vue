@@ -21,12 +21,12 @@ const ACTIONS: Record<string, string> = {
   BORROWER_ARCHIVED: 'Peminjam diarsipkan', BORROWER_REACTIVATED: 'Peminjam diaktifkan kembali',
   CATEGORY_CREATED: 'Kategori ditambahkan', CATEGORY_RENAMED: 'Kategori diganti nama', CATEGORY_ARCHIVED: 'Kategori diarsipkan',
   CATEGORY_RESTORED: 'Kategori diaktifkan kembali', INTEGRITY_FREEZE: 'Pemeriksaan integritas dimulai',
-  INTEGRITY_UNFREEZE: 'Pemeriksaan integritas selesai',
+  INTEGRITY_UNFREEZE: 'Pemeriksaan integritas selesai', TIMEZONE_CHANGED: 'Zona waktu akun diubah',
 }
 const FIELDS: Record<string, string> = {
   amount: 'Nominal', effectiveAt: 'Waktu efektif', title: 'Judul', description: 'Deskripsi', categoryId: 'Kategori',
   borrowerId: 'Peminjam', affectCashBalance: 'Pengaruh saldo', name: 'Nama', phone: 'Telepon', notes: 'Catatan',
-  archived: 'Diarsipkan', deleted: 'Dihapus',
+  archived: 'Diarsipkan', deleted: 'Dihapus', timezone: 'Zona waktu',
 }
 
 const auth = useAuth()
@@ -49,7 +49,7 @@ async function page(more = false) {
 onMounted(() => page())
 
 const show = (value: unknown, key: string) => value === null || value === undefined ? '—'
-  : key === 'amount' ? rupiah(String(value)) : key === 'effectiveAt' ? formatTime(String(value)) + ' WIB'
+  : key === 'amount' ? rupiah(String(value)) : key === 'effectiveAt' ? formatTime(String(value))
     : typeof value === 'boolean' ? (value ? 'Ya' : 'Tidak') : String(value)
 /** Fields an edit or restore changed; ids for category/borrower are shown as changed, not resolved. */
 function changes(item: Item) {
@@ -71,7 +71,7 @@ const activity = (item: Item) => item.action.startsWith('ACTIVITY_') || item.act
       <li v-for="item in items" :key="item.id" :data-action="item.action">
         <div>
           <strong>{{ ACTIONS[item.action] ?? item.action }}</strong>
-          <p>{{ formatTime(item.actionAt) }} WIB<template v-if="item.actor !== auth.profile?.id"> · Operator: {{ item.actor }}</template></p>
+          <p>{{ formatTime(item.actionAt) }}<template v-if="item.actor !== auth.profile?.id"> · Operator: {{ item.actor }}</template></p>
           <p v-if="item.details.reason">Alasan: {{ item.details.reason }}</p>
           <p v-for="c in changes(item)" :key="c.key">{{ c.label }}: {{ c.from }} → {{ c.to }}</p>
           <p v-if="item.details.stateBefore && item.details.stateAfter">

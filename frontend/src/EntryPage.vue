@@ -3,7 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { check, newOp, send, useEntries, useFinance } from './finance'
 import { REASONS } from './messages'
-import { KINDS, instant, localInput, parseAmount, rupiah } from './money'
+import { KINDS, accountZone, instant, localInput, parseAmount, rupiah } from './money'
 import { ApiError, useAuth } from './session'
 import { SyncError, useSync } from './sync/engine'
 import { VaultError, useVault } from './vault/store'
@@ -51,6 +51,7 @@ const locked = computed(() => busy.value || !!draft.queued || (!!draft.op && dra
 onMounted(async () => {
   await Promise.all([finance.load(), sync.refresh()])
   if (finance.live && finance.snapshot?.state.opening === 'pending') return router.replace({ name: 'onboarding' })
+  if (!f.whenSet && !f.original) f.when = localInput() // shown in the account zone, now that it is known
   if (fixId && !draft.loaded) {
     const item = sync.items.find((entry) => entry.clientActivityId === fixId)
     if (item) {
@@ -283,7 +284,7 @@ const done = computed(() => !!draft.queued || draft.op?.state === 'confirmed')
             : 'Tidak memengaruhi saldo: hanya piutang yang berubah.' }}</p>
         </template>
 
-        <label for="when">Tanggal dan waktu efektif (WIB)</label>
+        <label for="when">Tanggal dan waktu efektif ({{ accountZone() }})</label>
         <input id="when" v-model="f.when" type="datetime-local" required @input="f.whenSet = true" :aria-invalid="!!errors.when"
           :aria-describedby="errors.when ? 'when-error' : undefined">
         <p v-if="errors.when" id="when-error" class="field-error">{{ errors.when }}</p>

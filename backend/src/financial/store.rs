@@ -52,6 +52,17 @@ pub async fn read_account(conn: &mut MySqlConnection, owner: &str) -> Result<Acc
     .unwrap_or_default())
 }
 
+/// The account's IANA timezone; an account row not created yet has the default.
+pub async fn timezone(conn: &mut MySqlConnection, owner: &str) -> Result<String, Failure> {
+    Ok(
+        sqlx::query_scalar("SELECT timezone FROM financial_accounts WHERE owner_id=?")
+            .bind(owner)
+            .fetch_optional(conn)
+            .await?
+            .unwrap_or_else(|| "Asia/Jakarta".to_owned()),
+    )
+}
+
 #[derive(FromRow)]
 pub struct Entry {
     pub id: String,

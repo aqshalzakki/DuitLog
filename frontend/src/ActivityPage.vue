@@ -95,7 +95,7 @@ const sign = (kind: string) => (kind === 'DEDUCT' || kind === 'LOAN' ? '−' : '
         <div><dt>Jenis</dt><dd>{{ KINDS[activity.kind] }}</dd></div>
         <div v-if="activity.amount"><dt>Nominal</dt><dd data-amount>{{ sign(activity.kind) }}{{ rupiah(activity.amount) }}</dd></div>
         <div v-else><dt>Target saldo</dt><dd>{{ rupiah(activity.targetBalance) }} (selisih saat ini {{ rupiah(activity.snapshotDelta) }})</dd></div>
-        <div><dt>Waktu efektif</dt><dd>{{ formatTime(activity.effectiveAt) }} WIB</dd></div>
+        <div><dt>Waktu efektif</dt><dd>{{ formatTime(activity.effectiveAt) }}</dd></div>
         <div v-if="activity.title"><dt>Judul</dt><dd>{{ activity.title }}</dd></div>
         <div v-if="!snapshot && !activity.borrowerId"><dt>Kategori</dt>
           <dd>{{ category ? category.name + (category.archived ? ' (diarsipkan)' : '') : 'Tanpa kategori' }}</dd></div>

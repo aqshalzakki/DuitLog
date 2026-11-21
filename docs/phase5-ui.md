@@ -1,9 +1,10 @@
-# Fase 5 · Product UX (slice 1–4)
+# Fase 5 · Product UX (slice 1–5)
 
 Slice ini mencakup SCR-05, SCR-06, SCR-09 (sebagian), SCR-10, SCR-11, SCR-19 dan SCR-21 (koreksi konflik). Rujukan: PR-BAL-01, PR-DASH-01/05/06/07/08, PR-TXN-01–08 (tanpa lampiran), PR-REC-01/03/04/09, PR-OFF-03–05, dan §6.4. **Fase 5 dan gate G4 belum selesai.**
 
 Slice 2 menambah Riwayat, detail, edit/hapus/restore, Baru dihapus, Kategori, dan Piutang (daftar peminjam).
 Slice 4 menambah Laporan (SCR-20) dan statistik periode di Beranda (sebagian SCR-09). Rujukan: BR-RPT-01–08, BR-RPT-11, PR-DASH-02/03, PR-RPT-01–06, AC-20.
+Slice 5 menambah Pengaturan (sebagian SCR-23): tema dan zona waktu akun. Rujukan: BR-RPT-11, BR-UX-03, PR-RPT-10, PR-SET-01/02, PR-NFR-11.
 Slice 3 menambah Penyesuaian Saldo (SCR-16), Detail Peminjam (SCR-18), dan Audit (SCR-24). Rujukan: PR-BAL-02–04, PR-BAL-06, PR-REC-06/07, PR-HIS-08.
 
 Belum termasuk:
@@ -15,7 +16,8 @@ Belum termasuk:
 - Daftar detail transaksi di halaman Laporan. Ringkasan, seri, dan tabel per kategori/peminjam sudah ada; daftar per transaksi menyusul bersama ekspor.
 - Grafik di Beranda. Beranda hanya menampilkan ringkasan periode dengan tautan ke Laporan, tempat grafik berada.
 - Perbandingan periode untuk Pergerakan Saldo dan Piutang. Yang ada baru perbandingan pemasukan, pengeluaran, dan selisih bersih.
-- Draft persisten, lampiran, Settings (zona waktu, tema), dan Audit History
+- Draft persisten, lampiran, dan Audit History
+- Bagian lain SCR-23: profil, PIN/keamanan, dan hapus data offline. Sesi perangkat tetap di `/sessions`.
 - Bottom navigation mobile lima slot dan peringatan logout bila ada pending
 - Login dan verifikasi masih mendarat di `/account`. Beranda ada di `/`.
 
@@ -53,14 +55,14 @@ Belum termasuk:
 | Konsistensi | Ledger, kategori, dan peminjam dibaca dalam satu transaksi InnoDB REPEATABLE READ (default; pool tidak mengubahnya). Tidak mengambil lock akun. |
 | Sumber angka | Saldo dan piutang pembuka/penutup memakai `model::replay` pada prefiks ledger, dan delta snapshot diambil dari replay penuh. Pergerakan dalam rentang memakai `Activity::signed_amount`/`moves_cash`, helper yang juga dipakai `replay`, jadi aturan kasnya tidak diduplikasi. Server memeriksa pembuka + komponen = penutup dan per peminjam awal + pinjaman − pembayaran = akhir; selisih berarti defect (500). |
 | Pemasukan/pengeluaran | Hanya Increase/Deduct yang tidak terhapus. Pinjaman, pembayaran, snapshot, dan pending tidak dihitung. Kategori null = "Tanpa kategori"; kategori arsip tetap muncul. |
-| Periode | Batas dihitung di server dengan zona Asia/Jakarta. Minggu mulai Senin. Periode berjalan dipotong di "sekarang" dan dibandingkan dengan waktu berlalu yang sama sejak awal periode sebelumnya, dipotong di akhirnya (31 Maret ↔ Februari penuh). Periode selesai dibandingkan dengan periode penuh sebelumnya. Custom dibandingkan dengan rentang sama panjang tepat sebelumnya. Periode di masa depan, custom terbalik, atau lebih dari 5 tahun → 422. |
+| Periode | Batas dihitung di server dengan zona waktu akun (slice 5; sebelumnya tetap Asia/Jakarta). Minggu mulai Senin. Periode berjalan dipotong di "sekarang" dan dibandingkan dengan waktu berlalu yang sama sejak awal periode sebelumnya, dipotong di akhirnya (31 Maret ↔ Februari penuh). Periode selesai dibandingkan dengan periode penuh sebelumnya. Custom dibandingkan dengan rentang sama panjang tepat sebelumnya. Periode di masa depan, custom terbalik, atau lebih dari 5 tahun → 422. |
 | Perbandingan | Integer saja, persepuluhan persen dibulatkan menjauhi nol, terhadap \|sebelumnya\|. Keduanya 0 → `ZERO` ("0%"). Sebelumnya 0 dan sekarang positif → `NEW` ("Baru"). Sebelumnya 0 dan sekarang negatif → `NO_BASELINE`, dijelaskan di UI. |
 | Seri | Harian sampai 92 hari, bulanan untuk tahunan atau rentang lebih panjang. Pergerakan saldo memberi saldo akhir per bucket. |
 | Freeze/recovery | Laporan ditolak dengan kode yang sama dengan mutasi (423/503). Angka dari ledger yang belum diverifikasi tidak ditampilkan seolah resmi. |
 | UI `/reports` | Hanya online (`session` + `verified`) dan tidak pernah disimpan ke cache vault. Tiga tab, pilihan periode dan tanggal atau rentang, serta label rentang dan pembanding. Grafik berupa tabel dengan bar CSS: pemasukan polos, pengeluaran/negatif bergaris, jadi warna bukan satu-satunya pembeda, dan angka selalu tertulis. Gagal tanpa jawaban server → "Laporan hanya tersedia saat online", tanpa angka. |
 | Beranda | Statistik periode (harian sampai tahunan) dari endpoint yang sama, hanya online. Saldo terkonfirmasi dan piutang di atasnya tidak bergantung pada periode. |
 
-**Usulan, dapat direview:** zona waktu tetap Asia/Jakarta di server (`report::ZONE`) sampai ada pengaturan akun; minggu mulai Senin; batas custom 5 tahun; laporan ditolak saat freeze/recovery; cara baca persen terhadap baseline negatif.
+**Usulan, dapat direview:** minggu mulai Senin; batas custom 5 tahun; laporan ditolak saat freeze/recovery; cara baca persen terhadap baseline negatif.
 
 `shortcut:` setiap laporan memuat dan me-replay seluruh ledger owner. Perlu total tersimpan atau replay ber-checkpoint bila ledger mencapai puluhan ribu baris.
 
@@ -69,7 +71,20 @@ Backend slice 3:
 - Parameter query yang tidak valid di `/activities` dan `/audit` sekarang dijawab `422 VALIDATION_ERROR` dengan bentuk error API. Sebelumnya axum mengirim 400 berupa teks biasa.
 - Diuji di `phase2_financial.py`: hanya aktivitas peminjam itu, peminjam lain kosong, akun lain kosong, kursor, dan tiga query yang salah.
 
-**Usulan, dapat direview:** zona waktu akun belum ada di backend, jadi UI memakai Asia/Jakarta (UTC+7, default BRD) untuk input dan tampilan. Juga diusulkan: rute `/add/:kind` dan `/onboarding`, Beranda di `/`, serta teks label.
+**Usulan, dapat direview:** rute `/add/:kind` dan `/onboarding`, Beranda di `/`, serta teks label.
+
+## Pengaturan (slice 5)
+
+| Bagian | Implementasi |
+| --- | --- |
+| Penyimpanan zona | Migrasi `0003_timezone.sql`: kolom `financial_accounts.timezone`, default `Asia/Jakarta`. Instant, snapshot, dan saldo tidak disentuh, jadi mengganti zona hanya mengubah pengelompokan. |
+| Zona yang didukung | Semua zona IANA. `jiff =1.0.1` (fitur `std`, `tz-fat`, `tzdb-bundle-always`) membawa tzdb sendiri, jadi aturannya sama di Windows dan di image Docker minimal tanpa `/usr/share/zoneinfo`. Dependensi baru: jiff, jiff-core, jiff-tzdb. Hari DST bisa 23 atau 25 jam; tengah malam yang tidak ada diganti instant pertama sesudah celah. |
+| `PUT /settings/timezone {timezone}` | Nama zona yang tidak dikenal, kosong, atau lebih dari 64 karakter → 422. Dijalankan dalam transaksi dengan lock akun (`anchor` FOR UPDATE), dan audit `TIMEZONE_CHANGED` mencatat nilai sebelum dan sesudah. Kalau nilainya sama, tidak ada perubahan dan tidak ada audit. Versi state finansial tidak naik karena ini bukan mutasi finansial. Karena menulis `financial_audit`, perubahan ditolak saat freeze akun (423) atau recovery global (503), sama seperti sync. |
+| `/financial-state` | Menyertakan `timezone`. Frontend memakainya, juga dari cache vault saat offline, untuk input waktu efektif, tampilan waktu, dan "hari ini". Konversi memakai offset Intl per instant, jadi DST ikut terhitung. Waktu dinding di celah DST jatuh tepat sesudah celah; di tumpang-tindih, salah satu dari dua instant. Label "WIB" yang tetap diganti nama zona dari Intl. Logout atau ganti akun mengembalikan zona ke default. Zona bersifat reaktif: form baru mengisi ulang waktu yang belum disentuh setelah state dimuat, dan Laporan memuat state lebih dulu sebelum menentukan "hari ini". Waktu yang belum disentuh tetap dikirim sebagai instant "sekarang", bukan teks yang tampil. |
+| UI `/settings` | Pilihan zona dari `Intl.supportedValuesOf('timeZone')` ditambah `UTC`, karena Chrome tidak mencantumkannya. Saat diuji, ke-418 zona dari daftar Intl Node dikenali tzdb jiff. Sebelum menyimpan, UI meminta konfirmasi dengan peringatan bahwa tanggal transaksi lama bisa pindah grup (PR-RPT-10). Zona hanya bisa diubah saat online. |
+| Tema | Terang/Gelap/Ikuti sistem lewat `data-theme` di `<html>` dan token warna CSS (`color-scheme` ikut). Pilihan disimpan per perangkat di `localStorage` (`duit-theme`). Isinya bukan data finansial, dan kalau storage diblokir, pilihan hanya berlaku di halaman itu. |
+
+**Usulan, dapat direview:** tema disimpan per perangkat, bukan per akun di server (PR-SET-01 meminta "dipertahankan", tanpa menyebut lintas perangkat). Endpoint `PUT /settings/timezone`. Ganti zona ditolak saat freeze/recovery. Kontras token diukur dengan rumus WCAG untuk kedua palet: teks ≥ 4,5:1 (terendah: teks redup 7,1:1 terang dan 7,8:1 gelap), fokus dan border field ≥ 3:1. Border select/textarea dipindah dari `--border` (sekitar 1,6:1, gagal 1.4.11, sudah ada sejak sebelumnya) ke `--field-border`. Uji manual dengan pembaca layar dan zoom belum dilakukan.
 
 ## Verifikasi
 
@@ -137,3 +152,22 @@ Belum dijalankan:
 - Layar mobile sungguhan.
 - Browser selain Chrome.
 - Edit dan hapus saat vault terbuka tetap lewat jalur online langsung, tidak lewat antrean. Ini sesuai aturan online-only, tetapi belum diuji dengan vault terbuka.
+
+Verifikasi slice 5:
+- `cargo test`: 15 uji. Uji `report.rs` kini memakai zona akun, ditambah uji DST America/New_York: 8 Maret 2026 = 23 jam, 1 November 2026 = 25 jam, Maret punya 31 bucket, dan zona tidak valid ditolak.
+- `phase2_financial.py` di MySQL:
+  - ganti ke UTC membuat 17:00Z pindah ke 10 Maret;
+  - `/activities`, saldo, dan versi state tetap sama;
+  - zona akun lain tetap;
+  - audit `TIMEZONE_CHANGED` sebelum/sesudah, dan nilai sama tidak menambah audit;
+  - tiga nilai tidak valid → 422;
+  - di America/New_York, 14 Maret 2021 berlangsung 05:00Z–04:00Z.
+- `phase1_auth.py` kini mengharapkan tiga migrasi.
+- `phase5_reports.py::settings_test` lewat UI sungguhan:
+  - tema Gelap mengubah atribut, `localStorage`, dan warna latar; Ikuti sistem menghapus keduanya;
+  - ganti zona ke UTC menampilkan peringatan dan server belum berubah sebelum konfirmasi;
+  - setelah dikonfirmasi, Laporan 10 Maret menampilkan Rp500 dan Audit menampilkan "Zona waktu akun diubah";
+  - muat langsung `/add/increase` dengan zona Asia/Tokyo: label dan isian waktu dalam jam Tokyo, dan simpan → `effectiveAt` server dalam 2 menit dari sekarang;
+  - muat langsung `/reports` dengan zona America/New_York: tanggal default = hari ini di New York, dan laporan tampil.
+- Ganti zona saat freeze → 423 dan saat recovery → 503 (`phase2_financial.py`).
+- `cargo-audit` tidak terpasang, jadi audit dependensi Rust (termasuk jiff) tidak dijalankan. `npm audit`: 0 kerentanan.

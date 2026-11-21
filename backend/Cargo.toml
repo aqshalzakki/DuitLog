@@ -12,6 +12,8 @@ base64 = "=0.22.1"
 email_address = { version = "=0.2.9", default-features = false }
 getrandom = "=0.4.3"
 hmac = "=0.12.1"
+# Bundled tzdb: same zone rules on the Windows dev box and a minimal Docker image without /usr/share/zoneinfo.
+jiff = { version = "=1.0.1", default-features = false, features = ["std", "tz-fat", "tzdb-bundle-always"] }
 lettre = { version = "=0.11.24", default-features = false, features = ["builder", "smtp-transport", "tokio1-native-tls"] }
 serde = { version = "=1.0.229", features = ["derive"] }
 serde_json = "=1.0.154"

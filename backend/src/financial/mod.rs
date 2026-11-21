@@ -428,12 +428,54 @@ pub(crate) async fn view_state(db: &MySqlPool, owner: &str) -> Result<Value, Fai
     let active: bool = sqlx::query_scalar("SELECT active FROM financial_recovery WHERE id=1")
         .fetch_one(&mut *tx)
         .await?;
+    let timezone = store::timezone(&mut tx, owner).await?;
     tx.rollback().await?;
     Ok(json!({
+        "timezone": timezone,
         "balance": Money(state.balance), "receivables": Money(state.receivables),
         "financialStateVersion": state.version, "opening": state.opening,
         "frozen": state.frozen, "recoveryActive": active, "updatedAt": state.updated_at.map(Moment),
     }))
+}
+
+/// Account zone for date grouping (BR-RPT-11). Only the zone column changes: stored instants and
+/// snapshot targets stay as they are, so reports regroup without any ledger rewrite. Audited with
+/// the old and new value under the account lock so two devices cannot interleave unaudited.
+/// shortcut: the freeze/recovery check runs before the lock, like whole-sync; a hold that starts in
+/// between still lets one zone change through, which never alters a balance.
+pub(crate) async fn set_timezone(
+    db: &MySqlPool,
+    owner: &str,
+    name: &str,
+) -> Result<Value, Failure> {
+    if report::zone(name).is_none() {
+        return Err(Code::ValidationError.into());
+    }
+    // Writes financial_audit, so it waits while an operator verifies this account or the restore.
+    sync_allowed(db, owner).await?;
+    let mut tx = db.begin().await?;
+    store::anchor(&mut tx, owner).await?;
+    let before = store::timezone(&mut tx, owner).await?;
+    if before != name {
+        sqlx::query("UPDATE financial_accounts SET timezone=? WHERE owner_id=?")
+            .bind(name)
+            .bind(owner)
+            .execute(&mut *tx)
+            .await?;
+        let details = json!({ "before": { "timezone": before }, "after": { "timezone": name } });
+        store::audit(
+            &mut tx,
+            owner,
+            owner,
+            "TIMEZONE_CHANGED",
+            Moment::now(),
+            None,
+            details,
+        )
+        .await?;
+    }
+    commit(tx).await?;
+    Ok(json!({ "timezone": name }))
 }
 
 /// Whole-sync gate. Each item still rechecks both holds under the account lock in `execute`.
@@ -458,13 +500,20 @@ pub(crate) async fn report(
     owner: &str,
     family: &str,
     period: report::Period,
-    from: time::Date,
-    to: Option<time::Date>,
+    from: Option<jiff::civil::Date>,
+    to: Option<jiff::civil::Date>,
 ) -> Result<Value, Failure> {
     sync_allowed(db, owner).await?;
-    let ranges = report::ranges(period, from, to, Moment::now().0)?;
-    // InnoDB REPEATABLE READ: ledger, categories and borrowers come from the same snapshot.
+    // InnoDB REPEATABLE READ: zone, ledger, categories and borrowers come from the same snapshot.
     let mut tx = db.begin().await?;
+    let zone_name = store::timezone(&mut tx, owner).await?;
+    let now = Moment::now().0;
+    let zone = report::zone(&zone_name).ok_or(Failure::Internal)?; // stored zones are validated on write
+    let from = match from {
+        Some(date) => date,
+        None => report::today(now, &zone)?,
+    };
+    let ranges = report::ranges(period, from, to, now, &zone_name)?;
     let rows = store::ledger(&mut tx, owner).await?;
     let categories = store::categories(&mut tx, owner).await?;
     let borrowers = store::borrowers(&mut tx, owner).await?;

@@ -4,8 +4,8 @@
 
 use std::collections::BTreeMap;
 
+use jiff::{Timestamp, ToSpan, civil::Date, tz::TimeZone};
 use serde_json::{Value, json};
-use time::{Date, Duration, Month, OffsetDateTime, PrimitiveDateTime, Time, UtcOffset};
 
 use super::{
     Failure,
@@ -13,10 +13,8 @@ use super::{
     store,
 };
 
-/// shortcut: one fixed account timezone (Asia/Jakarta, UTC+7, no DST since 1964); switch to the
-/// account setting when Settings adds one.
-pub const ZONE: &str = "Asia/Jakarta";
-const OFFSET_SECONDS: i32 = 7 * 3600;
+/// BRD default for a new account.
+pub const DEFAULT_ZONE: &str = "Asia/Jakarta";
 /// Custom ranges longer than this are refused; daily buckets up to `DAILY_BUCKETS`, monthly beyond.
 const MAX_DAYS: i64 = 366 * 5;
 const DAILY_BUCKETS: i64 = 92;
@@ -61,7 +59,7 @@ pub struct Window {
     pub end: i64,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 pub struct Ranges {
     pub period: Period,
     pub current: Window,
@@ -69,27 +67,42 @@ pub struct Ranges {
     /// The period has not finished: `current` stops at now and `previous` at the same elapsed point.
     pub running: bool,
     monthly: bool,
+    zone: TimeZone,
+    zone_name: String,
 }
 
-fn offset() -> UtcOffset {
-    // 25200 s is a valid offset, so the fallback is unreachable; it keeps the request path panic-free.
-    UtcOffset::from_whole_seconds(OFFSET_SECONDS).unwrap_or(UtcOffset::UTC)
+fn invalid<E>(_: E) -> Failure {
+    Code::ValidationError.into()
 }
 
-fn midnight(date: Date) -> i64 {
-    PrimitiveDateTime::new(date, Time::MIDNIGHT)
-        .assume_offset(offset())
-        .unix_timestamp()
-        * MICROS
+/// An IANA zone from the bundled tzdb; `None` for anything else.
+pub fn zone(name: &str) -> Option<TimeZone> {
+    if name.is_empty() || name.len() > 64 {
+        return None;
+    }
+    TimeZone::get(name).ok()
 }
 
-fn local_date(micros: i64) -> Result<Date, Failure> {
-    Ok(
-        OffsetDateTime::from_unix_timestamp(micros.div_euclid(MICROS))
-            .map_err(|_| Failure::from(Code::ValidationError))?
-            .to_offset(offset())
-            .date(),
-    )
+/// First instant of a local day. Where midnight does not exist (a DST gap) this is the first
+/// instant after the gap.
+fn midnight(date: Date, zone: &TimeZone) -> Result<i64, Failure> {
+    Ok(date
+        .to_zoned_datetime(zone.clone())
+        .map_err(invalid)?
+        .timestamp()
+        .as_microsecond())
+}
+
+fn local_date(micros: i64, zone: &TimeZone) -> Result<Date, Failure> {
+    Ok(Timestamp::from_microsecond(micros)
+        .map_err(invalid)?
+        .to_zoned_datetime(zone.clone())
+        .date())
+}
+
+/// The local date in `zone` at `micros`; the default for a period with no date given.
+pub fn today(micros: i64, zone: &TimeZone) -> Result<Date, Failure> {
+    local_date(micros, zone)
 }
 
 pub fn parse_date(value: &str) -> Option<Date> {
@@ -98,44 +111,42 @@ pub fn parse_date(value: &str) -> Option<Date> {
     if parts.next().is_some() || year.len() != 4 || month.len() != 2 || day.len() != 2 {
         return None;
     }
-    let month = Month::try_from(month.parse::<u8>().ok()?).ok()?;
-    Date::from_calendar_date(year.parse().ok()?, month, day.parse().ok()?).ok()
+    Date::new(year.parse().ok()?, month.parse().ok()?, day.parse().ok()?).ok()
 }
 
 fn label(date: Date) -> String {
-    format!(
-        "{:04}-{:02}-{:02}",
-        date.year(),
-        u8::from(date.month()),
-        date.day()
-    )
+    format!("{:04}-{:02}-{:02}", date.year(), date.month(), date.day())
 }
 
 fn add_days(date: Date, days: i64) -> Result<Date, Failure> {
-    date.checked_add(Duration::days(days))
-        .ok_or(Code::ValidationError.into())
+    date.checked_add(days.days()).map_err(invalid)
 }
 
-fn month_start(date: Date, months_back: i32) -> Result<Date, Failure> {
-    let index = date.year() * 12 + i32::from(u8::from(date.month())) - 1 - months_back;
-    let month = Month::try_from((index.rem_euclid(12) + 1) as u8)
-        .map_err(|_| Failure::from(Code::ValidationError))?;
-    Date::from_calendar_date(index.div_euclid(12), month, 1)
-        .map_err(|_| Code::ValidationError.into())
+fn month_start(date: Date, months_back: i64) -> Result<Date, Failure> {
+    date.first_of_month()
+        .checked_add((-months_back).months())
+        .map_err(invalid)
 }
 
-fn year_start(year: i32) -> Result<Date, Failure> {
-    Date::from_calendar_date(year, Month::January, 1).map_err(|_| Code::ValidationError.into())
+fn year_start(year: i16) -> Result<Date, Failure> {
+    Date::new(year, 1, 1).map_err(invalid)
 }
 
-/// Current and comparison windows. A running period is compared with the same elapsed time from the
-/// start of the previous one (clamped to its end, e.g. 31 March vs February); a finished period with
-/// the whole previous one. Custom compares with the equally long range just before it.
-pub fn ranges(period: Period, from: Date, to: Option<Date>, now: i64) -> Result<Ranges, Failure> {
+/// Current and comparison windows in the account zone. A running period is compared with the same
+/// elapsed time from the start of the previous one (clamped to its end, e.g. 31 March vs February); a
+/// finished period with the whole previous one. Custom compares with the equally long range before it.
+pub fn ranges(
+    period: Period,
+    from: Date,
+    to: Option<Date>,
+    now: i64,
+    zone_name: &str,
+) -> Result<Ranges, Failure> {
+    let zone = self::zone(zone_name).ok_or(Code::ValidationError)?;
     let (start, next, previous) = match period {
         Period::Day => (from, add_days(from, 1)?, add_days(from, -1)?),
         Period::Week => {
-            let monday = add_days(from, -i64::from(from.weekday().number_days_from_monday()))?;
+            let monday = add_days(from, -i64::from(from.weekday().to_monday_zero_offset()))?;
             (monday, add_days(monday, 7)?, add_days(monday, -7)?)
         }
         Period::Month => (
@@ -143,21 +154,23 @@ pub fn ranges(period: Period, from: Date, to: Option<Date>, now: i64) -> Result<
             month_start(from, -1)?,
             month_start(from, 1)?,
         ),
-        Period::Year => (
-            year_start(from.year())?,
-            year_start(from.year() + 1)?,
-            year_start(from.year() - 1)?,
-        ),
+        Period::Year => {
+            let year = from.year();
+            let next = year.checked_add(1).ok_or(Code::ValidationError)?;
+            (year_start(year)?, year_start(next)?, year_start(year - 1)?)
+        }
         Period::Custom => {
             let to = to.ok_or(Code::ValidationError)?;
-            let days = (to - from).whole_days() + 1;
+            let days = i64::from(from.until(to).map_err(invalid)?.get_days()) + 1;
             if !(1..=MAX_DAYS).contains(&days) {
                 return Err(Code::ValidationError.into());
             }
             (from, add_days(to, 1)?, add_days(from, -days)?)
         }
     };
-    let (start, end, previous_start) = (midnight(start), midnight(next), midnight(previous));
+    let start = midnight(start, &zone)?;
+    let end = midnight(next, &zone)?;
+    let previous_start = midnight(previous, &zone)?;
     if start > now {
         return Err(Code::ValidationError.into()); // nothing confirmed can lie in the future
     }
@@ -179,10 +192,12 @@ pub fn ranges(period: Period, from: Date, to: Option<Date>, now: i64) -> Result<
         },
         running,
         monthly: period == Period::Year || (end - start) / (86_400 * MICROS) > DAILY_BUCKETS,
+        zone,
+        zone_name: zone_name.to_owned(),
     })
 }
 
-fn describe(window: Window) -> Result<Value, Failure> {
+fn describe(window: Window, zone: &TimeZone) -> Result<Value, Failure> {
     // The last included day is the one holding the final microsecond of the window.
     let last = if window.end > window.start {
         window.end - 1
@@ -190,25 +205,27 @@ fn describe(window: Window) -> Result<Value, Failure> {
         window.start
     };
     Ok(json!({
-        "from": label(local_date(window.start)?), "to": label(local_date(last)?),
+        "from": label(local_date(window.start, zone)?), "to": label(local_date(last, zone)?),
         "start": Moment(window.start), "end": Moment(window.end),
     }))
 }
 
-/// Day or month buckets covering the current window, each `[start, end)` clipped to it.
+/// Day or month buckets covering the current window, each `[start, end)` clipped to it. A local day
+/// may be 23 or 25 hours long across a DST change.
 fn buckets(ranges: &Ranges) -> Result<Vec<(String, Window)>, Failure> {
     let Window { start, end } = ranges.current;
+    let zone = &ranges.zone;
     let mut list = Vec::new();
-    let mut day = local_date(start)?;
-    while midnight(day) < end {
+    let mut day = local_date(start, zone)?;
+    while midnight(day, zone)? < end {
         let next = if ranges.monthly {
             month_start(day, -1)?
         } else {
             add_days(day, 1)?
         };
         let window = Window {
-            start: midnight(day).max(start),
-            end: midnight(next).min(end),
+            start: midnight(day, zone)?.max(start),
+            end: midnight(next, zone)?.min(end),
         };
         let name = if ranges.monthly {
             label(day)[..7].to_owned()
@@ -337,7 +354,7 @@ pub fn income_expense(
         })
         .collect::<Vec<_>>();
     Ok(json!({
-        "range": range(ranges)?, "comparison": describe(ranges.previous)?, "timezone": ZONE,
+        "range": range(ranges)?, "comparison": describe(ranges.previous, &ranges.zone)?, "timezone": ranges.zone_name,
         "current": totals(income, expense), "previous": totals(before_income, before_expense),
         "change": {
             "income": change(income, before_income), "expense": change(expense, before_expense),
@@ -376,7 +393,7 @@ pub fn balance_movement(ledger: &Ledger, ranges: &Ranges) -> Result<Value, Failu
         series.push(json!({ "label": name, "closing": amount(running) }));
     }
     Ok(json!({
-        "range": range(ranges)?, "timezone": ZONE, "opening": amount(opening), "income": amount(income),
+        "range": range(ranges)?, "timezone": ranges.zone_name, "opening": amount(opening), "income": amount(income),
         "expense": amount(expense), "loansOut": amount(loans), "repaymentsIn": amount(repayments),
         "snapshotDelta": amount(snapshots), "closing": amount(closing), "series": series,
     }))
@@ -425,13 +442,13 @@ pub fn receivables(
         }));
     }
     Ok(json!({
-        "range": range(ranges)?, "timezone": ZONE, "opening": amount(sum_open), "loans": amount(sum_loans),
+        "range": range(ranges)?, "timezone": ranges.zone_name, "opening": amount(sum_open), "loans": amount(sum_loans),
         "repayments": amount(sum_repaid), "closing": amount(sum_close), "borrowers": list,
     }))
 }
 
 fn range(ranges: &Ranges) -> Result<Value, Failure> {
-    let mut value = describe(ranges.current)?;
+    let mut value = describe(ranges.current, &ranges.zone)?;
     value["period"] = json!(ranges.period.name());
     value["running"] = json!(ranges.running);
     Ok(value)
@@ -441,18 +458,34 @@ fn range(ranges: &Ranges) -> Result<Value, Failure> {
 mod tests {
     use super::*;
 
+    const JAKARTA: &str = "Asia/Jakarta";
+
+    fn jakarta() -> TimeZone {
+        zone(JAKARTA).unwrap()
+    }
+
     fn at(date: &str, hour: i64) -> i64 {
-        midnight(parse_date(date).unwrap()) + hour * 3600 * MICROS
+        midnight(parse_date(date).unwrap(), &jakarta()).unwrap() + hour * 3600 * MICROS
     }
 
     fn day(micros: i64) -> String {
-        label(local_date(micros).unwrap())
+        label(local_date(micros, &jakarta()).unwrap())
+    }
+
+    fn range(period: Period, from: &str, to: Option<&str>, now: i64) -> Result<Ranges, Failure> {
+        ranges(
+            period,
+            parse_date(from).unwrap(),
+            to.and_then(parse_date),
+            now,
+            JAKARTA,
+        )
     }
 
     #[test]
     fn running_month_compares_the_same_elapsed_part_of_the_previous_month() {
         let now = at("2026-11-21", 14);
-        let r = ranges(Period::Month, parse_date("2026-11-05").unwrap(), None, now).unwrap();
+        let r = range(Period::Month, "2026-11-05", None, now).unwrap();
         assert!(r.running);
         assert_eq!((r.current.start, r.current.end), (at("2026-11-01", 0), now));
         assert_eq!(
@@ -464,7 +497,7 @@ mod tests {
     #[test]
     fn running_31_march_is_clamped_to_the_end_of_february() {
         let now = at("2026-03-31", 10);
-        let r = ranges(Period::Month, parse_date("2026-03-31").unwrap(), None, now).unwrap();
+        let r = range(Period::Month, "2026-03-31", None, now).unwrap();
         assert_eq!(
             (r.previous.start, r.previous.end),
             (at("2026-02-01", 0), at("2026-03-01", 0))
@@ -474,7 +507,7 @@ mod tests {
     #[test]
     fn finished_periods_compare_with_the_whole_previous_period() {
         let now = at("2026-11-21", 14);
-        let month = ranges(Period::Month, parse_date("2026-02-10").unwrap(), None, now).unwrap();
+        let month = range(Period::Month, "2026-02-10", None, now).unwrap();
         assert!(!month.running);
         assert_eq!(
             (month.current.start, month.current.end),
@@ -484,14 +517,14 @@ mod tests {
             (month.previous.start, month.previous.end),
             (at("2026-01-01", 0), at("2026-02-01", 0))
         );
-        let year = ranges(Period::Year, parse_date("2025-06-01").unwrap(), None, now).unwrap();
+        let year = range(Period::Year, "2025-06-01", None, now).unwrap();
         assert_eq!(
             (year.previous.start, year.previous.end),
             (at("2024-01-01", 0), at("2025-01-01", 0))
         );
         assert!(year.monthly);
-        // 2026-11-18 is a Wednesday; weeks start on Monday.
-        let week = ranges(Period::Week, parse_date("2026-11-11").unwrap(), None, now).unwrap();
+        // 2026-11-11 is a Wednesday; weeks start on Monday.
+        let week = range(Period::Week, "2026-11-11", None, now).unwrap();
         assert_eq!(
             (week.current.start, week.previous.start),
             (at("2026-11-09", 0), at("2026-11-02", 0))
@@ -501,13 +534,7 @@ mod tests {
     #[test]
     fn custom_ranges_compare_with_the_equally_long_range_before_them() {
         let now = at("2026-11-21", 14);
-        let r = ranges(
-            Period::Custom,
-            parse_date("2026-10-10").unwrap(),
-            parse_date("2026-10-19"),
-            now,
-        )
-        .unwrap();
+        let r = range(Period::Custom, "2026-10-10", Some("2026-10-19"), now).unwrap();
         assert_eq!(
             (r.current.start, r.current.end),
             (at("2026-10-10", 0), at("2026-10-20", 0))
@@ -516,13 +543,7 @@ mod tests {
             (r.previous.start, r.previous.end),
             (at("2026-09-30", 0), at("2026-10-10", 0))
         );
-        let today = ranges(
-            Period::Custom,
-            parse_date("2026-11-20").unwrap(),
-            parse_date("2026-11-21"),
-            now,
-        )
-        .unwrap();
+        let today = range(Period::Custom, "2026-11-20", Some("2026-11-21"), now).unwrap();
         assert!(today.running);
         assert_eq!(
             (today.previous.start, today.previous.end),
@@ -533,21 +554,25 @@ mod tests {
     #[test]
     fn invalid_ranges_are_refused() {
         let now = at("2026-11-21", 14);
-        let from = parse_date("2026-10-10").unwrap();
-        assert!(ranges(Period::Custom, from, parse_date("2026-10-09"), now).is_err());
-        assert!(ranges(Period::Custom, from, None, now).is_err());
+        assert!(range(Period::Custom, "2026-10-10", Some("2026-10-09"), now).is_err());
+        assert!(range(Period::Custom, "2026-10-10", None, now).is_err());
+        assert!(range(Period::Custom, "2016-01-01", Some("2026-01-01"), now).is_err());
+        assert!(range(Period::Day, "2026-11-22", None, now).is_err());
         assert!(
             ranges(
-                Period::Custom,
-                parse_date("2016-01-01").unwrap(),
-                parse_date("2026-01-01"),
-                now
+                Period::Day,
+                parse_date("2026-11-01").unwrap(),
+                None,
+                now,
+                "Mars/Olympus"
             )
             .is_err()
         );
-        assert!(ranges(Period::Day, parse_date("2026-11-22").unwrap(), None, now).is_err());
         assert_eq!(parse_date("2026-2-01"), None);
         assert_eq!(parse_date("2026-02-30"), None);
+        assert!(
+            zone("").is_none() && zone("Not/AZone").is_none() && zone("America/New_York").is_some()
+        );
     }
 
     #[test]
@@ -558,6 +583,45 @@ mod tests {
             (day(before), day(before + 1)),
             ("2026-05-21".to_owned(), "2026-05-22".to_owned())
         );
+    }
+
+    #[test]
+    fn dst_days_are_23_and_25_hours_long() {
+        let york = zone("America/New_York").unwrap();
+        let now = midnight(parse_date("2026-12-01").unwrap(), &york).unwrap();
+        let day = |date| {
+            ranges(
+                Period::Day,
+                parse_date(date).unwrap(),
+                None,
+                now,
+                "America/New_York",
+            )
+            .unwrap()
+        };
+        let (spring, autumn) = (day("2026-03-08"), day("2026-11-01"));
+        assert_eq!(
+            spring.current.end - spring.current.start,
+            23 * 3600 * MICROS
+        );
+        assert_eq!(
+            autumn.current.end - autumn.current.start,
+            25 * 3600 * MICROS
+        );
+        let march = ranges(
+            Period::Month,
+            parse_date("2026-03-01").unwrap(),
+            None,
+            now,
+            "America/New_York",
+        )
+        .unwrap();
+        let days = buckets(&march).unwrap();
+        assert_eq!(
+            (days.len(), days[7].1.end - days[7].1.start),
+            (31, 23 * 3600 * MICROS)
+        );
+        assert_eq!(march.zone_name, "America/New_York");
     }
 
     #[test]

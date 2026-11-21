@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { ApiError, useAuth } from './session'
+import { setZone } from './money'
 import { refused } from './sync/engine'
 import { useVault } from './vault/store'
 
@@ -10,6 +11,7 @@ export type FinancialState = {
   opening: 'pending' | 'skipped' | 'recorded'
   frozen: boolean
   recoveryActive: boolean
+  timezone?: string
   updatedAt?: string
 }
 export type Borrower = { id: string; name: string; outstanding: string; archived: boolean; status: string }
@@ -34,6 +36,7 @@ export const useFinance = defineStore('finance', () => {
         ])
         snapshot.value = { state, borrowers, categories, at: Date.now() }
         live.value = true
+        setZone(state.timezone)
         // Cached only from a live answer for the vault's own owner.
         if (vault.status === 'unlocked' && !vault.expired && vault.owner === owner) {
           await vault.save('cache', 'finance', snapshot.value).catch(() => undefined)
@@ -47,11 +50,13 @@ export const useFinance = defineStore('finance', () => {
     snapshot.value = vault.status === 'unlocked' && !vault.expired
       ? (await vault.read('finance').catch(() => undefined)) as Snapshot | undefined
       : undefined
+    setZone(snapshot.value?.state.timezone)
   }
 
   function clear() {
     snapshot.value = undefined
     live.value = false
+    setZone('Asia/Jakarta') // the next account never sees the previous one's zone
   }
 
   return { snapshot, live, load, clear }
