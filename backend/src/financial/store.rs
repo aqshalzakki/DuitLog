@@ -13,6 +13,8 @@ pub struct Account {
     pub opening: String,
     pub frozen: bool,
     pub updated_at: Option<i64>,
+    /// Defaults already created (or a pre-existing account, marked by migration 0004).
+    pub default_categories: bool,
 }
 
 impl Default for Account {
@@ -25,25 +27,69 @@ impl Default for Account {
             opening: "pending".into(),
             frozen: false,
             updated_at: None,
+            default_categories: true,
         }
     }
 }
 
+/// Default categories per account (BR-HIS-01); ordinary rows afterwards, renamed or archived like any other.
+pub const DEFAULT_CATEGORIES: [&str; 10] = [
+    "Makan & Minum",
+    "Transportasi",
+    "Belanja",
+    "Tagihan",
+    "Kesehatan",
+    "Hiburan",
+    "Pendidikan",
+    "Gaji",
+    "Bonus",
+    "Lainnya",
+];
+
 pub async fn anchor(tx: &mut Transaction<'_, MySql>, owner: &str) -> Result<Account, Failure> {
+    // The upsert takes the row's exclusive lock at once; a shared lock here would let two first
+    // writes deadlock when both upgrade to FOR UPDATE.
     sqlx::query("INSERT INTO financial_accounts (owner_id) VALUES (?) ON DUPLICATE KEY UPDATE owner_id=owner_id")
         .bind(owner).execute(&mut **tx).await?;
-    Ok(sqlx::query_as(
-        "SELECT balance,receivables,next_sequence,version,opening,frozen,updated_at
+    let mut account: Account = sqlx::query_as(
+        "SELECT balance,receivables,next_sequence,version,opening,frozen,updated_at,default_categories
         FROM financial_accounts WHERE owner_id=? FOR UPDATE",
     )
     .bind(owner)
     .fetch_one(&mut **tx)
-    .await?)
+    .await?;
+    if !account.default_categories {
+        for name in DEFAULT_CATEGORIES {
+            sqlx::query("INSERT INTO categories (owner_id,id,name) VALUES (?,?,?)")
+                .bind(owner)
+                .bind(crate::crypto::id().map_err(|_| Failure::Internal)?)
+                .bind(name)
+                .execute(&mut **tx)
+                .await?;
+        }
+        sqlx::query("UPDATE financial_accounts SET default_categories=TRUE WHERE owner_id=?")
+            .bind(owner)
+            .execute(&mut **tx)
+            .await?;
+        let details = serde_json::json!({ "names": DEFAULT_CATEGORIES });
+        audit(
+            tx,
+            owner,
+            owner,
+            "DEFAULT_CATEGORIES_CREATED",
+            Moment::now(),
+            None,
+            details,
+        )
+        .await?;
+        account.default_categories = true;
+    }
+    Ok(account)
 }
 
 pub async fn read_account(conn: &mut MySqlConnection, owner: &str) -> Result<Account, Failure> {
     Ok(sqlx::query_as(
-        "SELECT balance,receivables,next_sequence,version,opening,frozen,updated_at
+        "SELECT balance,receivables,next_sequence,version,opening,frozen,updated_at,default_categories
         FROM financial_accounts WHERE owner_id=?",
     )
     .bind(owner)
@@ -134,14 +180,32 @@ pub async fn one(conn: &mut MySqlConnection, owner: &str, id: &str) -> Result<Ac
     row.into_activity()
 }
 
+/// History filters (PR-HIS-02), all owner-scoped and combined with AND; validated by the caller.
+#[derive(Default)]
+pub struct Filter {
+    pub deleted: bool,
+    pub before: Option<i64>,
+    pub borrower: Option<String>,
+    pub kind: Option<Kind>,
+    /// `Some(None)` is "no category".
+    pub category: Option<Option<String>>,
+    /// Matched against title and description, case-insensitively by the column collation.
+    pub text: Option<String>,
+    /// `[start, end)` effective instants.
+    pub start: Option<i64>,
+    pub end: Option<i64>,
+}
+
 pub async fn history(
     conn: &mut MySqlConnection,
     owner: &str,
-    deleted: bool,
-    before: Option<i64>,
-    borrower: Option<&str>,
+    f: &Filter,
 ) -> Result<Vec<Activity>, Failure> {
-    let rows: Vec<Entry> = if let Some(sequence) = before {
+    let mut q = sqlx::QueryBuilder::<MySql>::new(entries!("WHERE owner_id="));
+    q.push_bind(owner)
+        .push(" AND deleted=")
+        .push_bind(f.deleted);
+    if let Some(sequence) = f.before {
         let instant: i64 = sqlx::query_scalar(
             "SELECT effective_at FROM activities WHERE owner_id=? AND sequence=?",
         )
@@ -150,31 +214,51 @@ pub async fn history(
         .fetch_optional(&mut *conn)
         .await?
         .ok_or(Code::NotFound)?;
-        sqlx::query_as(entries!(
-            "WHERE owner_id=? AND deleted=? AND (? IS NULL OR borrower_id=?)
-            AND (effective_at<? OR (effective_at=? AND sequence<?)) ORDER BY effective_at DESC,sequence DESC LIMIT 51"
-        ))
-        .bind(owner)
-        .bind(deleted)
-        .bind(borrower)
-        .bind(borrower)
-        .bind(instant)
-        .bind(instant)
-        .bind(sequence)
-        .fetch_all(conn)
-        .await?
-    } else {
-        sqlx::query_as(entries!(
-            "WHERE owner_id=? AND deleted=? AND (? IS NULL OR borrower_id=?)
-            ORDER BY effective_at DESC,sequence DESC LIMIT 51"
-        ))
-        .bind(owner)
-        .bind(deleted)
-        .bind(borrower)
-        .bind(borrower)
-        .fetch_all(conn)
-        .await?
-    };
+        q.push(" AND (effective_at<")
+            .push_bind(instant)
+            .push(" OR (effective_at=")
+            .push_bind(instant)
+            .push(" AND sequence<")
+            .push_bind(sequence)
+            .push("))");
+    }
+    if let Some(borrower) = &f.borrower {
+        q.push(" AND borrower_id=").push_bind(borrower.as_str());
+    }
+    if let Some(kind) = f.kind {
+        q.push(" AND kind=").push_bind(kind as i8);
+    }
+    match &f.category {
+        Some(Some(id)) => {
+            q.push(" AND category_id=").push_bind(id.as_str());
+        }
+        Some(None) => {
+            q.push(" AND category_id IS NULL");
+        }
+        None => {}
+    }
+    if let Some(text) = &f.text {
+        // LIKE wildcards in the user's text are literal.
+        let pattern = format!(
+            "%{}%",
+            text.replace('\\', r"\\")
+                .replace('%', r"\%")
+                .replace('_', r"\_")
+        );
+        q.push(" AND (title LIKE ")
+            .push_bind(pattern.clone())
+            .push(" OR description LIKE ")
+            .push_bind(pattern)
+            .push(")");
+    }
+    if let Some(start) = f.start {
+        q.push(" AND effective_at>=").push_bind(start);
+    }
+    if let Some(end) = f.end {
+        q.push(" AND effective_at<").push_bind(end);
+    }
+    q.push(" ORDER BY effective_at DESC,sequence DESC LIMIT 51");
+    let rows: Vec<Entry> = q.build_query_as().fetch_all(conn).await?;
     rows.into_iter().map(Entry::into_activity).collect()
 }
 

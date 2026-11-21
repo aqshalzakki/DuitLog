@@ -157,6 +157,10 @@ def logout(page, origin):
     page.go(origin + "/account")
     page.see("Array.from(document.querySelectorAll('button')).some(b => b.textContent.trim() === 'Keluar')")
     page.click("Keluar")
+    # PR-OFF-10: a device with a vault (locked after the full load, or holding pending) warns first.
+    page.see("location.pathname === '/login' || !!document.querySelector('[data-logout-warning]')")
+    if page.js("!!document.querySelector('[data-logout-warning]')"):
+        page.click("Tetap keluar")
     page.see("location.pathname === '/login'")
 
 
@@ -273,6 +277,8 @@ def offline_test(browser, env, origin, api_port, work, mail):
         from phase5_reports import reports_test, settings_test
         reports_test(chrome, origin, api_port, mail)
         settings_test(chrome, origin, api_port, mail)
+        from phase5_slice6 import slice6_test
+        slice6_test(chrome, origin, api_port, mail)
 
 
 def run(chrome, origin, api_port, mail):

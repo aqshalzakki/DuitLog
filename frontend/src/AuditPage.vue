@@ -7,7 +7,7 @@ type State = { balance: string; receivables: string }
 type Item = {
   id: number; actor: string; action: string; actionAt: string
   details: {
-    resourceId?: string; reason?: string; before?: Record<string, unknown> | null; after?: Record<string, unknown> | null
+    resourceId?: string; reason?: string; names?: string[]; before?: Record<string, unknown> | null; after?: Record<string, unknown> | null
     snapshotChanges?: { id: string; targetBalance: string; beforeDelta?: string; afterDelta?: string }[]
     borrowerChanges?: { after: { name: string }; automaticallyReactivated: boolean }[]
     stateBefore?: State; stateAfter?: State
@@ -22,6 +22,7 @@ const ACTIONS: Record<string, string> = {
   CATEGORY_CREATED: 'Kategori ditambahkan', CATEGORY_RENAMED: 'Kategori diganti nama', CATEGORY_ARCHIVED: 'Kategori diarsipkan',
   CATEGORY_RESTORED: 'Kategori diaktifkan kembali', INTEGRITY_FREEZE: 'Pemeriksaan integritas dimulai',
   INTEGRITY_UNFREEZE: 'Pemeriksaan integritas selesai', TIMEZONE_CHANGED: 'Zona waktu akun diubah',
+  DEFAULT_CATEGORIES_CREATED: 'Kategori default dibuat',
 }
 const FIELDS: Record<string, string> = {
   amount: 'Nominal', effectiveAt: 'Waktu efektif', title: 'Judul', description: 'Deskripsi', categoryId: 'Kategori',
@@ -73,6 +74,7 @@ const activity = (item: Item) => item.action.startsWith('ACTIVITY_') || item.act
           <strong>{{ ACTIONS[item.action] ?? item.action }}</strong>
           <p>{{ formatTime(item.actionAt) }}<template v-if="item.actor !== auth.profile?.id"> · Operator: {{ item.actor }}</template></p>
           <p v-if="item.details.reason">Alasan: {{ item.details.reason }}</p>
+          <p v-if="item.details.names">{{ item.details.names.join(', ') }}</p>
           <p v-for="c in changes(item)" :key="c.key">{{ c.label }}: {{ c.from }} → {{ c.to }}</p>
           <p v-if="item.details.stateBefore && item.details.stateAfter">
             Saldo {{ rupiah(item.details.stateBefore.balance) }} → {{ rupiah(item.details.stateAfter.balance) }} ·

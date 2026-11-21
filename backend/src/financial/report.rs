@@ -197,6 +197,25 @@ pub fn ranges(
     })
 }
 
+/// First instant of local day `from` and first instant after local day `to`, either side optional;
+/// refused when reversed. History has no length cap: it is paginated.
+pub fn days(
+    from: Option<Date>,
+    to: Option<Date>,
+    zone: &TimeZone,
+) -> Result<(Option<i64>, Option<i64>), Failure> {
+    if let (Some(from), Some(to)) = (from, to)
+        && from > to
+    {
+        return Err(Code::ValidationError.into());
+    }
+    let start = from.map(|d| midnight(d, zone)).transpose()?;
+    let end = to
+        .map(|d| add_days(d, 1).and_then(|next| midnight(next, zone)))
+        .transpose()?;
+    Ok((start, end))
+}
+
 fn describe(window: Window, zone: &TimeZone) -> Result<Value, Failure> {
     // The last included day is the one holding the final microsecond of the window.
     let last = if window.end > window.start {

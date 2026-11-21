@@ -3,7 +3,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useFinance } from './finance'
 import { KINDS, formatTime, rupiah } from './money'
-import { useAuth } from './session'
+import { ApiError, useAuth } from './session'
 import { useSync } from './sync/engine'
 
 type Row = {
@@ -29,6 +29,14 @@ const STATES: Record<string, string> = {
   CONFLICT: 'Konflik', BLOCKED: 'Tertahan',
 }
 
+// PR-HIS-02: filters run on the server over confirmed activities; dates are in the account zone.
+const empty = { q: '', kind: '', category: '', from: '', to: '' }
+const filter = ref({ ...empty })
+const applied = ref({ ...empty })
+const filtering = computed(() => Object.values(applied.value).some((v) => v))
+const categories = computed(() => finance.snapshot?.categories ?? [])
+const invalid = ref(false)
+
 let latest = 0 // switching Riwayat ↔ Baru dihapus mid-load: only the newest request may fill the list
 
 async function page(more = false) {
@@ -36,16 +44,20 @@ async function page(more = false) {
   const mine = ++latest
   busy.value = true
   failed.value = false
+  invalid.value = false
   try {
     const query = new URLSearchParams()
     if (deleted.value) query.set('deleted', 'true')
     if (more && next.value !== null) query.set('before', String(next.value))
+    for (const [key, value] of Object.entries(applied.value)) if (value) query.set(key, value.trim())
     const reply = await auth.authorized<{ items: Row[]; nextCursor: number | null }>('/activities?' + query)
     if (mine !== latest) return
     rows.value = more ? [...rows.value, ...reply.items] : reply.items
     next.value = reply.nextCursor
-  } catch {
-    if (mine === latest) failed.value = true
+  } catch (error) {
+    if (mine !== latest) return
+    invalid.value = error instanceof ApiError && error.code === 'VALIDATION_ERROR'
+    failed.value = !invalid.value
   } finally {
     if (mine === latest) busy.value = false
   }
@@ -53,6 +65,14 @@ async function page(more = false) {
 
 onMounted(() => Promise.all([finance.load(), sync.refresh(), page()]))
 watch(deleted, () => page())
+function search() {
+  applied.value = { ...filter.value }
+  void page()
+}
+function reset() {
+  filter.value = { ...empty }
+  search()
+}
 
 const sign = (row: Row) => (row.kind === 'DEDUCT' || row.kind === 'LOAN' ? '−' : '+')
 </script>
@@ -81,9 +101,41 @@ const sign = (row: Row) => (row.kind === 'DEDUCT' || row.kind === 'LOAN' ? '−'
     </template>
 
     <h2 v-if="!deleted && waiting.length">Tercatat</h2>
+    <details v-if="online" :open="filtering">
+      <summary>Cari dan filter</summary>
+      <form novalidate data-history-filter @submit.prevent="search">
+        <label for="q">Cari judul atau deskripsi</label>
+        <input id="q" v-model="filter.q" type="search" maxlength="100" autocomplete="off">
+        <label for="kind">Jenis</label>
+        <select id="kind" v-model="filter.kind">
+          <option value="">Semua jenis</option>
+          <option v-for="(name, key) in KINDS" :key="key" :value="key">{{ name }}</option>
+        </select>
+        <label for="category">Kategori</label>
+        <select id="category" v-model="filter.category">
+          <option value="">Semua kategori</option>
+          <option value="none">Tanpa kategori</option>
+          <option v-for="c in categories" :key="c.id" :value="c.id">{{ c.name }}{{ c.archived ? ' (diarsipkan)' : '' }}</option>
+        </select>
+        <fieldset class="plain">
+          <legend class="visually-hidden">Tanggal efektif</legend>
+          <label for="from">Dari tanggal</label><input id="from" v-model="filter.from" type="date">
+          <label for="to">Sampai tanggal</label><input id="to" v-model="filter.to" type="date">
+        </fieldset>
+        <div class="actions">
+          <button class="secondary" :disabled="busy">Terapkan</button>
+          <button v-if="filtering" type="button" class="link-button" :disabled="busy" @click="reset">Hapus filter</button>
+        </div>
+      </form>
+      <p class="hint">Filter berlaku untuk transaksi tercatat; yang belum tersinkron tetap tampil di atas.</p>
+    </details>
     <p v-if="!online" class="notice info">Riwayat tercatat hanya tersedia saat online. Data di perangkat ini tidak memuat riwayat lengkap.</p>
     <p v-else-if="failed" class="notice error" role="alert">Riwayat gagal dimuat. <button type="button" class="link-button" @click="page()">Coba lagi</button></p>
-    <p v-else-if="!busy && !rows.length" class="hint">{{ deleted ? 'Tidak ada transaksi yang dihapus.' : 'Belum ada transaksi.' }}</p>
+    <p v-else-if="invalid" class="notice error" role="alert">Filter tidak valid. Periksa tanggalnya: "Dari" tidak boleh setelah "Sampai".</p>
+    <div role="status" aria-live="polite">
+      <p v-if="online && !failed && !invalid && !busy && !rows.length" class="hint" data-history-empty>{{ filtering
+        ? 'Tidak ada transaksi yang cocok dengan filter.' : deleted ? 'Tidak ada transaksi yang dihapus.' : 'Belum ada transaksi.' }}</p>
+    </div>
     <ul class="recent" data-history>
       <li v-for="row in rows" :key="row.id">
         <div>

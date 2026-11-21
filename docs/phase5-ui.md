@@ -1,24 +1,23 @@
-# Fase 5 · Product UX (slice 1–5)
+# Fase 5 · Product UX (slice 1–6)
 
 Slice ini mencakup SCR-05, SCR-06, SCR-09 (sebagian), SCR-10, SCR-11, SCR-19 dan SCR-21 (koreksi konflik). Rujukan: PR-BAL-01, PR-DASH-01/05/06/07/08, PR-TXN-01–08 (tanpa lampiran), PR-REC-01/03/04/09, PR-OFF-03–05, dan §6.4. **Fase 5 dan gate G4 belum selesai.**
 
 Slice 2 menambah Riwayat, detail, edit/hapus/restore, Baru dihapus, Kategori, dan Piutang (daftar peminjam).
 Slice 4 menambah Laporan (SCR-20) dan statistik periode di Beranda (sebagian SCR-09). Rujukan: BR-RPT-01–08, BR-RPT-11, PR-DASH-02/03, PR-RPT-01–06, AC-20.
+Slice 6 menambah kategori default, pencarian/filter Riwayat, ubah profil peminjam, dan peringatan logout bila ada pending. Rujukan: BR-HIS-01, BR-HIS-06, BR-OFF-16, PR-CAT-01, PR-HIS-02, PR-OFF-10, PR-SEC-07.
 Slice 5 menambah Pengaturan (sebagian SCR-23): tema dan zona waktu akun. Rujukan: BR-RPT-11, BR-UX-03, PR-RPT-10, PR-SET-01/02, PR-NFR-11.
 Slice 3 menambah Penyesuaian Saldo (SCR-16), Detail Peminjam (SCR-18), dan Audit (SCR-24). Rujukan: PR-BAL-02–04, PR-BAL-06, PR-REC-06/07, PR-HIS-08.
 
 Belum termasuk:
-- Pencarian dan filter Riwayat. Server belum menyediakan filter; daftar hanya dipaginasi per `sequence`.
-- Ubah profil peminjam (endpoint sudah ada)
 - "Audit terkait" di Detail transaksi. Server belum bisa memfilter audit per resource.
-- Kategori default. Backend tidak menyemai kategori, padahal PRD memintanya.
 - Ekspor PDF/Excel dan status job (Fase 6, worker)
 - Daftar detail transaksi di halaman Laporan. Ringkasan, seri, dan tabel per kategori/peminjam sudah ada; daftar per transaksi menyusul bersama ekspor.
 - Grafik di Beranda. Beranda hanya menampilkan ringkasan periode dengan tautan ke Laporan, tempat grafik berada.
 - Perbandingan periode untuk Pergerakan Saldo dan Piutang. Yang ada baru perbandingan pemasukan, pengeluaran, dan selisih bersih.
 - Draft persisten, lampiran, dan Audit History
 - Bagian lain SCR-23: profil, PIN/keamanan, dan hapus data offline. Sesi perangkat tetap di `/sessions`.
-- Bottom navigation mobile lima slot dan peringatan logout bila ada pending
+- Bottom navigation mobile lima slot
+- Peringatan logout di halaman verifikasi email (`AuthPage`). Akun belum terverifikasi tidak bisa punya pending, jadi halaman ini dibiarkan.
 - Login dan verifikasi masih mendarat di `/account`. Beranda ada di `/`.
 
 ## Perilaku
@@ -85,6 +84,18 @@ Backend slice 3:
 | Tema | Terang/Gelap/Ikuti sistem lewat `data-theme` di `<html>` dan token warna CSS (`color-scheme` ikut). Pilihan disimpan per perangkat di `localStorage` (`duit-theme`). Isinya bukan data finansial, dan kalau storage diblokir, pilihan hanya berlaku di halaman itu. |
 
 **Usulan, dapat direview:** tema disimpan per perangkat, bukan per akun di server (PR-SET-01 meminta "dipertahankan", tanpa menyebut lintas perangkat). Endpoint `PUT /settings/timezone`. Ganti zona ditolak saat freeze/recovery. Kontras token diukur dengan rumus WCAG untuk kedua palet: teks ≥ 4,5:1 (terendah: teks redup 7,1:1 terang dan 7,8:1 gelap), fokus dan border field ≥ 3:1. Border select/textarea dipindah dari `--border` (sekitar 1,6:1, gagal 1.4.11, sudah ada sejak sebelumnya) ke `--field-border`. Uji manual dengan pembaca layar dan zoom belum dilakukan.
+
+## Slice 6
+
+| Bagian | Implementasi |
+| --- | --- |
+| Kategori default | 10 nama (keputusan pemilik): Makan & Minum, Transportasi, Belanja, Tagihan, Kesehatan, Hiburan, Pendidikan, Gaji, Bonus, Lainnya. Disemai sekali di `store::anchor`, dalam transaksi tulis pertama akun, bersama satu audit `DEFAULT_CATEGORIES_CREATED`. Setelah itu kategori ini sama seperti kategori personal: bisa diganti nama dan diarsipkan. Migrasi `0004_default_categories.sql` menambah flag `default_categories` dengan default TRUE (akun lama langsung tertandai selesai dalam satu statement, jadi tidak diubah diam-diam), lalu default kolom diubah menjadi FALSE untuk akun baru. Flag dibaca di SELECT `FOR UPDATE` akun yang memang sudah ada, jadi tidak ada query tambahan per tulis. Upsert akun tetap `ON DUPLICATE KEY UPDATE`, yang langsung mengambil lock eksklusif. Versi pertama memakai `INSERT IGNORE` dan uji tab paralel gagal sekali; dugaan penyebabnya deadlock karena lock bersama dinaikkan ke `FOR UPDATE`. Log tidak menunjukkan kode 1213, jadi penyebab itu belum terbukti. Setelah kembali ke upsert, uji itu lulus di setiap putaran berikutnya. |
+| Filter Riwayat | `GET /activities` menerima `q` (judul/deskripsi, ≤100 karakter, `%` dan `_` literal, tidak peka huruf besar lewat collation kolom), `kind`, `category` (UUID atau `none`), serta `from`/`to` (tanggal di zona akun; satu sisi saja berarti terbuka ke arah lain; `from` setelah `to` → 422; tanpa batas panjang karena hasil dipaginasi). Semua digabung dengan AND, dibatasi owner, dan kursor `before` tetap jalan di dalam filter. Nilai tidak valid → 422. Query dibangun dengan `sqlx::QueryBuilder` dan parameter terikat. |
+| UI Riwayat | Panel "Cari dan filter" (`<details>`, terbuka saat ada filter). Hasil kosong dan filter tidak valid diumumkan. Filter hanya untuk transaksi tercatat; item yang belum tersinkron tetap tampil di atasnya. |
+| Profil peminjam | "Ubah profil" di Detail Peminjam: nama wajib, telepon dan catatan opsional. Lewat `PATCH /borrowers/{id}` dengan `expectedVersion` dan `attemptId` yang sama saat hasilnya belum diketahui. Versi basi → pesan `VERSION_CONFLICT` dan data terbaru dimuat ulang. |
+| Peringatan logout | Di `/account` dan `/sessions`, "Keluar", "Keluar dari semua perangkat", dan "Cabut" pada sesi perangkat ini lebih dulu menampilkan peringatan bila: ada item antrean yang belum `SYNCED`, ada transaksi online yang sedang dikirim/diperiksa, atau Akses Offline milik akun ini terkunci (jumlahnya tidak bisa dihitung). "Tetap keluar" melanjutkan; tidak ada data lokal yang dihapus. Helper uji `logout()` kini mengonfirmasi peringatan itu. |
+
+**Usulan, dapat direview:** nama aksi audit `DEFAULT_CATEGORIES_CREATED` (label "Kategori default dibuat" beserta daftar namanya di Audit); pencarian tidak mencakup nama kategori atau peminjam.
 
 ## Verifikasi
 
@@ -171,3 +182,19 @@ Verifikasi slice 5:
   - muat langsung `/reports` dengan zona America/New_York: tanggal default = hari ini di New York, dan laporan tampil.
 - Ganti zona saat freeze → 423 dan saat recovery → 503 (`phase2_financial.py`).
 - `cargo-audit` tidak terpasang, jadi audit dependensi Rust (termasuk jiff) tidak dijalankan. `npm audit`: 0 kerentanan.
+
+Verifikasi slice 6:
+- `phase2_financial.py` di MySQL:
+  - akun baru mendapat tepat 10 kategori default aktif versi 1, dan audit seeding hanya ada satu;
+  - filter kategori/`none`, jenis, pencarian dengan `%` dan `_` literal, tidak peka huruf besar, batas hari WIB, tanggal satu sisi yang terbuka, kursor di dalam filter;
+  - akun lain tidak menemukan apa pun dengan id kategori milik bob;
+  - lima query tidak valid → 422;
+  - ubah profil peminjam naik ke versi 2, versi basi → 409, akun lain → 404.
+- Uji paralel `phase3_sync.py` (empat tab) lulus lagi setelah kembali ke upsert eksklusif.
+- `phase1_auth.py` kini mengharapkan empat migrasi.
+- `phase5_slice6.py` lewat UI sungguhan:
+  - form Pengeluaran menawarkan 10 kategori default, dan Audit menampilkan "Kategori default dibuat";
+  - Riwayat: cari "50%", jenis + tanggal, hasil kosong, rentang terbalik → pesan, Hapus filter;
+  - Ubah profil: nama kosong ditolak, simpan → server versi 2, perubahan dari perangkat lain → pesan versi dan data dimuat ulang;
+  - pembayaran offline yang menjadi Konflik → "Keluar" menampilkan "1 transaksi … belum tersinkron", Batal tetap di halaman; pindah ke Perangkat menutup peringatan; "Cabut" sesi ini → peringatan "Cabut sesi ini" → Tetap keluar → `/login`; server tidak punya pembayaran itu; masuk lagi dan buka kunci → item Konflik masih ada untuk akun yang sama.
+- Tidak diuji: migrasi 0004 terhadap database yang sudah berisi akun (tiap suite memakai database baru), dan pesan "sedang diperiksa hasilnya" saat logout.

@@ -510,6 +510,12 @@ struct History {
     deleted: bool,
     before: Option<i64>,
     borrower_id: Option<Uuid>,
+    kind: Option<Kind>,
+    /// A category id, or `none` for activities without one.
+    category: Option<String>,
+    q: Option<String>,
+    from: Option<String>,
+    to: Option<String>,
 }
 
 async fn history(
@@ -517,16 +523,36 @@ async fn history(
     actor: Actor,
     filter: Result<Query<History>, QueryRejection>,
 ) -> Result<Json<Value>, Failure> {
-    let Query(filter) = filter.map_err(|_| Failure::from(Code::ValidationError))?;
+    let Query(query) = filter.map_err(|_| Failure::from(Code::ValidationError))?;
+    let invalid = || Failure::from(Code::ValidationError);
+    let category = match query.category.as_deref() {
+        None => None,
+        Some("none") => Some(None),
+        Some(id) => Some(Some(
+            Uuid::parse_str(id).map_err(|_| invalid())?.to_string(),
+        )),
+    };
+    let text = match query.q.as_deref().map(str::trim) {
+        None | Some("") => None,
+        Some(text) if text.chars().count() <= 100 => Some(text.to_owned()),
+        Some(_) => return Err(invalid()),
+    };
+    let date = |value: &str| financial::report::parse_date(value).ok_or_else(invalid);
+    let days = (
+        query.from.as_deref().map(date).transpose()?,
+        query.to.as_deref().map(date).transpose()?,
+    );
+    let filter = store::Filter {
+        deleted: query.deleted,
+        before: query.before,
+        borrower: query.borrower_id.map(|id| id.to_string()),
+        kind: query.kind,
+        category,
+        text,
+        ..Default::default()
+    };
     Ok(Json(
-        financial::history(
-            &state.auth.db,
-            &actor.0.owner_id,
-            filter.deleted,
-            filter.before,
-            filter.borrower_id.map(|id| id.to_string()).as_deref(),
-        )
-        .await?,
+        financial::history(&state.auth.db, &actor.0.owner_id, filter, days).await?,
     ))
 }
 

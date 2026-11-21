@@ -1,7 +1,10 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { useEntries } from './finance'
 import { ApiError, api, type Device, useAuth } from './session'
+import { useSync } from './sync/engine'
+import { enrolledOwner, useVault } from './vault/store'
 
 const auth = useAuth()
 const route = useRoute()
@@ -11,6 +14,18 @@ const showDevices = computed(() => route.name === 'sessions')
 const busy = ref(false)
 const error = ref('')
 const status = ref('')
+const sync = useSync()
+const vault = useVault()
+const entries = useEntries()
+const asking = ref<boolean>()
+const revoking = ref<Device>()
+watch(showDevices, () => { asking.value = revoking.value = undefined }) // /account and /sessions share this page
+// PR-OFF-10: logout with pending is allowed, after a warning. Nothing local is deleted either way.
+const pending = computed(() => sync.items.filter((item) => item.state !== 'SYNCED').length)
+const unsure = computed(() => Object.values(entries.drafts).filter((d) =>
+  [d.op, d.borrowerOp].some((op) => op?.state === 'sending' || op?.state === 'checking')).length)
+// A locked vault cannot be counted; say so instead of claiming there is nothing pending.
+const locked = computed(() => enrolledOwner() === auth.profile?.id && vault.status !== 'unlocked')
 const date = new Intl.DateTimeFormat('id-ID', { dateStyle: 'medium', timeStyle: 'short' })
 
 async function action(work: () => Promise<void>) {
@@ -39,7 +54,13 @@ async function exit() {
   await router.replace({ name: 'login' })
 }
 
-function logout(all: boolean) {
+function logout(all: boolean, confirmed = false) {
+  if (!confirmed && (pending.value || unsure.value || locked.value)) {
+    revoking.value = undefined
+    asking.value = all
+    return
+  }
+  asking.value = undefined
   return action(async () => {
     if (all) await auth.authorized('/auth/logout-all', 'POST')
     else await api('/auth/logout', 'POST')
@@ -47,7 +68,13 @@ function logout(all: boolean) {
   })
 }
 
-function revoke(device: Device) {
+function revoke(device: Device, confirmed = false) {
+  // Revoking this device's own session is a logout: same warning (PR-OFF-10).
+  if (device.current && !confirmed && (pending.value || unsure.value || locked.value)) {
+    revoking.value = device
+    return
+  }
+  revoking.value = undefined
   return action(async () => {
     await auth.authorized('/sessions/' + encodeURIComponent(device.id), 'DELETE')
     if (device.current) await exit()
@@ -58,7 +85,10 @@ function revoke(device: Device) {
   })
 }
 
-onMounted(() => { void action(load) })
+onMounted(() => {
+  void action(load)
+  void sync.refresh()
+})
 </script>
 
 <template>
@@ -90,6 +120,19 @@ onMounted(() => { void action(load) })
       </dl>
       <RouterLink to="/sessions">Kelola perangkat</RouterLink>
     </template>
+    <div v-if="asking !== undefined || revoking" class="notice info" role="alert" data-logout-warning>
+      <strong>{{ revoking ? 'Cabut sesi ini dan keluar sekarang?' : `Keluar ${asking ? 'dari semua perangkat ' : ''}sekarang?` }}</strong>
+      <p v-if="pending">{{ pending }} transaksi di perangkat ini belum tersinkron.</p>
+      <p v-if="unsure">{{ unsure }} transaksi online sedang diperiksa hasilnya; cek Riwayat setelah masuk lagi.</p>
+      <p v-if="locked">Akses Offline terkunci, jadi transaksi yang belum tersinkron tidak dapat dihitung.</p>
+      <p>Data offline tetap terenkripsi di perangkat ini dan hanya terbuka lagi untuk akun ini. Transaksi yang belum
+        tersinkron baru terkirim setelah kamu masuk kembali dan membuka Akses Offline.</p>
+      <div class="actions">
+        <button type="button" class="secondary" :disabled="busy"
+          @click="revoking ? revoke(revoking, true) : logout(!!asking, true)">Tetap keluar</button>
+        <button type="button" class="link-button" :disabled="busy" @click="asking = revoking = undefined">Batal</button>
+      </div>
+    </div>
     <div class="actions">
       <button type="button" class="link-button" :disabled="busy" @click="logout(false)">Keluar</button>
       <button v-if="showDevices" type="button" class="link-button" :disabled="busy"

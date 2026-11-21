@@ -22,6 +22,50 @@ const missing = ref(false)
 const busy = ref(false)
 const message = ref<{ tone: string; text: string }>()
 let op: Op | undefined
+let editOp: Op | undefined
+const editing = ref(false)
+const form = ref({ name: '', phone: '', notes: '' })
+const nameError = ref('')
+
+function startEdit() {
+  const b = borrower.value
+  if (!b) return
+  form.value = { name: b.name, phone: b.phone ?? '', notes: b.notes ?? '' }
+  nameError.value = ''
+  editing.value = true
+}
+
+/** Online only, against the version shown; a stale version is refused and the latest is reloaded. */
+async function saveEdit() {
+  const b = borrower.value
+  if (!b || busy.value) return
+  const name = form.value.name.trim()
+  nameError.value = name ? '' : 'Nama peminjam wajib diisi.'
+  if (!name) return
+  busy.value = true
+  message.value = undefined
+  try {
+    const path = '/borrowers/' + id
+    if (!editOp || editOp.state === 'rejected' || editOp.state === 'confirmed') editOp = newOp(path, 'PATCH')
+    if (editOp.state !== 'checking') {
+      editOp.body = { expectedVersion: b.version, name, phone: form.value.phone.trim() || null,
+        notes: form.value.notes.trim() || null }
+    }
+    await send(editOp)
+    if (editOp.state === 'confirmed') {
+      editing.value = false
+      message.value = { tone: 'success', text: 'Profil peminjam disimpan.' }
+      await Promise.all([load(), finance.load()])
+    } else if (editOp.state === 'checking') {
+      message.value = { tone: 'info', text: 'Hasilnya belum diketahui. Tekan Simpan lagi untuk memeriksa; tidak akan diterapkan dua kali.' }
+    } else {
+      message.value = { tone: 'error', text: REASONS[editOp.code ?? ''] ?? 'Profil belum dapat disimpan.' }
+      if (editOp.code === 'VERSION_CONFLICT') await load() // show what the other device saved
+    }
+  } finally {
+    busy.value = false
+  }
+}
 
 async function load() {
   try {
@@ -87,9 +131,25 @@ async function toggle() {
           <RouterLink :to="{ path: '/add/loan', query: { borrower: id } }">Catat pinjaman</RouterLink>
           <RouterLink :to="{ path: '/add/repayment', query: { borrower: id } }">Terima pembayaran</RouterLink>
         </template>
+        <button v-if="!editing" type="button" class="secondary" :disabled="busy" @click="startEdit">Ubah profil</button>
         <button v-if="borrower.archived || borrower.status === 'PAID'" type="button" class="secondary" :disabled="busy"
           @click="toggle">{{ borrower.archived ? 'Aktifkan kembali' : 'Arsipkan' }}</button>
       </div>
+      <form v-if="editing" novalidate data-borrower-edit @submit.prevent="saveEdit">
+        <label for="b-name">Nama</label>
+        <input id="b-name" v-model="form.name" maxlength="100" autocomplete="off" required
+          :aria-invalid="!!nameError" :aria-describedby="nameError ? 'b-name-error' : undefined">
+        <p v-if="nameError" id="b-name-error" class="field-error" role="alert">{{ nameError }}</p>
+        <label for="b-phone">Telepon (opsional)</label>
+        <input id="b-phone" v-model="form.phone" maxlength="40" autocomplete="off" inputmode="tel">
+        <label for="b-notes">Catatan (opsional)</label>
+        <textarea id="b-notes" v-model="form.notes" maxlength="1000" rows="3"></textarea>
+        <p class="hint">Nama boleh sama dengan peminjam lain. Riwayat dan sisa piutang tidak berubah.</p>
+        <div class="actions">
+          <button class="secondary" :disabled="busy">Simpan profil</button>
+          <button type="button" class="link-button" :disabled="busy" @click="editing = false">Batal</button>
+        </div>
+      </form>
       <p v-if="borrower.archived" class="hint">Aktifkan kembali untuk mencatat pinjaman atau pembayaran baru.</p>
 
       <h2>Riwayat piutang</h2>

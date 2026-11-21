@@ -58,7 +58,7 @@ def manage_test(chrome, origin, api_port, mail):
         page.fill("[data-category=Transport] input", "Ojek")
         page.submit("[data-category=Transport] input")
         message(page, "category", "Nama kategori diganti")
-        names = {c["name"]: c for c in client.request("GET", "/categories", 200)}
+        names = {c["name"]: c for c in client.request("GET", "/categories", 200) if c["name"] in ("Makan", "Ojek", "Transport")}
         check(sorted(names), ["Makan", "Ojek"])
 
         link(page, "Beranda")
@@ -75,10 +75,11 @@ def manage_test(chrome, origin, api_port, mail):
         link(page, "Kategori")
         row(page, "category", "Makan", "Arsipkan")
         message(page, "category", "Makan diarsipkan")
-        check({c["name"]: c["archived"] for c in client.request("GET", "/categories", 200)}, {"Makan": True, "Ojek": False})
+        check({c["name"]: c["archived"] for c in client.request("GET", "/categories", 200) if c["name"] in names},
+              {"Makan": True, "Ojek": False})
         link(page, "Beranda")
         link(page, "Pengeluaran")
-        page.see("document.querySelectorAll('#category option').length === 2")  # Tanpa kategori + Ojek
+        page.see("Array.from(document.querySelectorAll('#category option')).some(o => o.textContent === 'Ojek')")
         check(page.js("Array.from(document.querySelectorAll('#category option')).some(o => o.textContent === 'Makan')"), False)
         print("Categories UI: add, rename, archive; an archived category is not offered for new activity", flush=True)
 

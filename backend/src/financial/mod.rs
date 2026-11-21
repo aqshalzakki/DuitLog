@@ -541,15 +541,20 @@ pub(crate) async fn lookup(db: &MySqlPool, owner: &str, id: Uuid) -> Result<Outc
     Ok(result.0)
 }
 
+/// `days` is an inclusive local date range, either side open, read in the account zone of the same snapshot.
 pub(crate) async fn history(
     db: &MySqlPool,
     owner: &str,
-    deleted: bool,
-    before: Option<i64>,
-    borrower: Option<&str>,
+    mut filter: store::Filter,
+    days: (Option<jiff::civil::Date>, Option<jiff::civil::Date>),
 ) -> Result<Value, Failure> {
     let mut tx = db.begin().await?;
-    let mut items = store::history(&mut tx, owner, deleted, before, borrower).await?;
+    if days.0.is_some() || days.1.is_some() {
+        let zone = store::timezone(&mut tx, owner).await?;
+        let zone = report::zone(&zone).ok_or(Failure::Internal)?;
+        (filter.start, filter.end) = report::days(days.0, days.1, &zone)?;
+    }
+    let mut items = store::history(&mut tx, owner, &filter).await?;
     tx.rollback().await?;
     let more = items.len() > 50;
     items.truncate(50);

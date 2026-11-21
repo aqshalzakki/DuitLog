@@ -32,6 +32,10 @@ def signed_in(mail, port, origin, label):
     return client
 
 
+DEFAULT_CATEGORIES = ["Makan & Minum", "Transportasi", "Belanja", "Tagihan", "Kesehatan", "Hiburan", "Pendidikan",
+                      "Gaji", "Bonus", "Lainnya"]
+
+
 def activity(kind, amount, effective_at, **fields):
     return {"kind": kind, "amount": str(amount), "effectiveAt": effective_at, **fields}
 
@@ -64,6 +68,11 @@ def financial_test(database, env, mail, port, origin):
     opening = operation(alice, "/onboarding/opening-balance", {"targetBalance": "0"})
     check(opening["balance"], "0")
     operation(alice, "/onboarding/skip-opening-balance", status=409, code="OPENING_ALREADY_DECIDED")
+    # BR-HIS-01: defaults are created once with the financial account, as ordinary active categories.
+    check(sorted(c["name"] for c in alice.request("GET", "/categories", 200)), sorted(DEFAULT_CATEGORIES))
+    check(all(not c["archived"] and c["version"] == 1 for c in alice.request("GET", "/categories", 200)), True)
+    seeded = [i for i in alice.request("GET", "/audit", 200)["items"] if i["action"] == "DEFAULT_CATEGORIES_CREATED"]
+    check((len(seeded), seeded[0]["details"]["names"]), (1, DEFAULT_CATEGORIES))
     operation(bob, "/onboarding/skip-opening-balance")
     check(bob.request("GET", "/activities", 200)["items"], [])
     check(operation(bob, "/activities", input_a)["balance"], "-7")
@@ -103,7 +112,7 @@ def financial_test(database, env, mail, port, origin):
     check(alice.request("GET", "/activities?deleted=true", 200)["items"][0]["id"], cat_activity["resourceId"])
     operation(alice, cat_path + "/restore", {"expectedVersion": 3})
     check(alice.request("GET", cat_path, 200)["categoryId"], cat_id)
-    check(alice.request("GET", "/categories", 200)[0]["archived"], True)
+    check(next(c for c in alice.request("GET", "/categories", 200) if c["id"] == cat_id)["archived"], True)
 
     borrower = operation(alice, "/borrowers", {"name": "Same name", "phone": "123"})
     second = operation(alice, "/borrowers", {"name": "Same name"})
@@ -198,6 +207,7 @@ def financial_test(database, env, mail, port, origin):
     check(run_operator("unfreeze"), "frozen=false")
     check(alice.request("GET", "/integrity-status", 200)["frozen"], False)
     report_test(alice, bob)
+    history_filter_test(alice, bob)
     from phase2_stress import stress_test
     stress_test(database, mail, port, origin, bob, run_operator)
     from phase3_sync import sync_test
@@ -212,6 +222,43 @@ def financial_test(database, env, mail, port, origin):
     print("Financial Core MySQL: snapshots, history, receivable prefixes, categories, owner scope, "
           "parallel writes, idempotency, audit rollback and recovery/integrity guards OK", flush=True)
     use_db(database, "UPDATE financial_recovery SET active=FALSE WHERE id=1;")  # later suites share this database
+
+
+def history_filter_test(alice, bob):
+    """PR-HIS-02: server-side history filters, owner-scoped, dates in the account zone, cursor-compatible."""
+    bills = operation(bob, "/categories", {"name": "Listrik"})["resourceId"]
+    rows = [("DEDUCT", 11, "2022-05-01T16:59:59Z", {"title": "Token 50%", "categoryId": bills}),  # 1 May WIB
+            ("DEDUCT", 12, "2022-05-01T17:00:00Z", {"title": "Token 50x", "categoryId": bills}),  # 2 May WIB
+            ("INCREASE", 13, "2022-05-02T05:00:00Z", {"description": "gaji_mei"}),
+            ("INCREASE", 14, "2022-05-02T06:00:00Z", {"description": "gajiXmei"})]
+    ids = [operation(bob, "/activities", activity(k, a, t, **x))["resourceId"] for k, a, t, x in rows]
+    found = lambda q, who=bob: [i["id"] for i in who.request("GET", "/activities?" + q, 200)["items"]]
+    check(found(f"category={bills}"), [ids[1], ids[0]])
+    check(found("q=50%25"), [ids[0]])  # % is literal, not a wildcard
+    check(found("q=gaji_mei"), [ids[2]])  # _ is literal
+    check(found("q=TOKEN"), [ids[1], ids[0]])  # case-insensitive
+    check(found("kind=INCREASE&from=2022-05-02&to=2022-05-02"), [ids[3], ids[2]])
+    check(found("from=2022-05-01&to=2022-05-01"), [ids[0]])  # WIB day boundary
+    check(ids[2] in found("category=none&from=2022-05-02"), True)
+    check(found("kind=DEDUCT&from=2022-05-01"), [ids[1], ids[0]])  # one side open: everything since
+    check((ids[0] in found("kind=DEDUCT&to=2022-05-01"), ids[1] in found("kind=DEDUCT&to=2022-05-01")), (True, False))
+    check(ids[0] in found("category=none&from=2022-05-01&to=2022-05-02"), False)
+    first = bob.request("GET", "/activities?kind=INCREASE&from=2022-05-02&to=2022-05-02", 200)
+    check(first["nextCursor"], None)
+    page = found(f"kind=INCREASE&from=2022-05-02&before={first['items'][0]['sequence']}")
+    check(page[:1], [ids[2]])  # the cursor continues inside the filter
+    check(found(f"category={bills}", alice), [])  # another owner's category id finds nothing
+    check(found("q=Token", alice), [])
+    for bad in ("kind=GIFT", "category=abc", "q=" + "x" * 101, "from=2022-05-03&to=2022-05-01", "from=2022-5-1", "to=2022-02-30"):
+        check(bob.request("GET", "/activities?" + bad, 422)["code"], "VALIDATION_ERROR")
+    edited = operation(bob, "/borrowers", {"name": "Rina"})["resourceId"]
+    operation(bob, "/borrowers/" + edited, {"expectedVersion": 1, "name": "Rina S", "phone": "0812", "notes": None}, "PATCH")
+    check({k: bob.request("GET", "/borrowers/" + edited, 200)[k] for k in ("name", "phone", "version")},
+          {"name": "Rina S", "phone": "0812", "version": 2})
+    operation(bob, "/borrowers/" + edited, {"expectedVersion": 1, "name": "Old"}, "PATCH", 409, "VERSION_CONFLICT")
+    alice.request("PATCH", "/borrowers/" + edited, 404, data=request_body(expectedVersion=2, name="Mine"))
+    print("History filters: category/none, kind, literal %/_ search, WIB dates, cursor, owner scope, 422s; "
+          "borrower profile edit with version check", flush=True)
 
 
 def report_test(alice, bob):
