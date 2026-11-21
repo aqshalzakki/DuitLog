@@ -80,7 +80,7 @@ function again() {
         <div class="actions">
           <button v-if="!done" type="button" class="primary" :disabled="busy" @click="confirm">
             {{ draft.op?.state === 'checking' ? 'Periksa hasil' : 'Simpan penyesuaian' }}</button>
-          <button v-if="!locked" type="button" class="link-button" @click="f.review = false">Ubah target</button>
+          <button v-if="!locked" type="button" class="secondary" @click="f.review = false">Ubah target</button>
           <button v-if="done" type="button" class="secondary" @click="again">Sesuaikan lagi</button>
           <RouterLink to="/">Ke Beranda</RouterLink>
         </div>

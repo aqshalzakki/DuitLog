@@ -94,7 +94,7 @@ const toggle = (b: Borrower) => run(b.id, `/borrowers/${b.id}/${b.archived ? 're
         </div>
         <div class="row-end">
           <span>{{ rupiah(b.outstanding) }}</span>
-          <button v-if="online && (b.archived || b.status === 'PAID')" type="button" class="link-button" :disabled="busy"
+          <button v-if="online && (b.archived || b.status === 'PAID')" type="button" class="secondary small" :disabled="busy"
             @click="toggle(b)">{{ b.archived ? 'Aktifkan kembali' : 'Arsipkan' }}</button>
         </div>
       </li>

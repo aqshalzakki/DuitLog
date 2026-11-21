@@ -58,16 +58,16 @@ def reports_test(chrome, origin, api_port, mail):
         text(page, "[data-categories-report]", "Makan")
         check(page.js("document.querySelectorAll('[data-flow] tbody tr').length"), 1)
 
-        page.click("Pergerakan saldo")
+        select(page, "#family", "balance-movement")
         text(page, "[data-opening]", "Rp1.000")
         text(page, "[data-closing]", "Rp1.050")
-        page.click("Piutang")
+        select(page, "#family", "receivables")
         page.see("document.querySelector('[data-borrowers-report] tbody tr')?.textContent.includes('Tono')")
         check(page.js("Array.from(document.querySelectorAll('[data-borrowers-report] tbody td')).map(td => td.textContent)"),
               ["Rp0", "Rp270", "Rp50", "Rp220"])
         text(page, "[data-receivables-closing]", "Rp220")
 
-        page.click("Pemasukan & pengeluaran")
+        select(page, "#family", "income-expense")
         select(page, "#period", "month")
         page.fill("#date", "2021-03-01")
         page.submit("#date")

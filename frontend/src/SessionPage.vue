@@ -130,7 +130,7 @@ onMounted(() => {
       <div class="actions">
         <button type="button" class="secondary" :disabled="busy"
           @click="revoking ? revoke(revoking, true) : logout(!!asking, true)">Tetap keluar</button>
-        <button type="button" class="link-button" :disabled="busy" @click="asking = revoking = undefined">Batal</button>
+        <button type="button" class="secondary" :disabled="busy" @click="asking = revoking = undefined">Batal</button>
       </div>
     </div>
     <div class="actions">

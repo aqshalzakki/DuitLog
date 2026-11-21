@@ -95,7 +95,7 @@ const sign = (row: Row) => (row.kind === 'DEDUCT' || row.kind === 'LOAN' ? '−'
       </div>
       <template v-if="stats">
         <p class="hint">{{ rangeLabel(stats.range) }} · hanya transaksi terkonfirmasi</p>
-        <dl class="details" data-stats>
+        <dl class="details stats" data-stats>
           <div><dt>Pemasukan</dt><dd data-stats-income>{{ rupiah(stats.current.income) }} · {{ changeText(stats.change.income) }}</dd></div>
           <div><dt>Pengeluaran</dt><dd data-stats-expense>{{ rupiah(stats.current.expense) }} · {{ changeText(stats.change.expense) }}</dd></div>
           <div><dt>Selisih bersih</dt><dd>{{ rupiah(stats.current.net) }} · {{ changeText(stats.change.net) }}</dd></div>
@@ -122,7 +122,7 @@ const sign = (row: Row) => (row.kind === 'DEDUCT' || row.kind === 'LOAN' ? '−'
           <RouterLink :to="'/activity/' + row.id"><strong>{{ row.title || KINDS[row.kind] }}</strong></RouterLink>
           <p>{{ KINDS[row.kind] }} · {{ formatTime(row.effectiveAt) }}<template v-if="row.affectCashBalance === false"> · Tidak memengaruhi saldo</template></p>
         </div>
-        <span>{{ row.amount ? sign(row) + rupiah(row.amount) : rupiah(row.targetBalance) }}</span>
+        <span :class="['amt', row.amount ? (sign(row) === '+' ? 'in' : 'out') : '']">{{ row.amount ? sign(row) + rupiah(row.amount) : rupiah(row.targetBalance) }}</span>
       </li>
     </ul>
     <RouterLink v-if="finance.live" to="/history">Lihat semua riwayat</RouterLink>

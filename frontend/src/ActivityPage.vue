@@ -148,7 +148,7 @@ const sign = (kind: string) => (kind === 'DEDUCT' || kind === 'LOAN' ? '−' : '
         <textarea id="delete-reason" v-model="reason" rows="2" maxlength="500"></textarea>
         <div class="actions">
           <button class="secondary">Hapus transaksi</button>
-          <button type="button" class="link-button" @click="dialog?.close()">Batal</button>
+          <button type="button" class="secondary" @click="dialog?.close()">Batal</button>
         </div>
       </form>
     </dialog>

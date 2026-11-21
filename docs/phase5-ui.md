@@ -107,6 +107,21 @@ Backend slice 3:
 
 `shortcut:` filter audit memakai `JSON_EXTRACT` dan memindai baris audit owner. Perlu kolom `resource_id` berindeks bila audit owner mencapai puluhan ribu baris. Detail transaksi hanya memuat halaman pertama (50 entri).
 
+## Penyegaran tampilan
+
+Hanya presentasi; tidak ada aturan finansial, teks, atau struktur DOM yang diuji yang berubah.
+
+- Token `--soft` (tint hijau) ditambahkan di ketiga blok tema. Judul memakai sans tebal.
+- Header di desktop berupa pil dengan status aktif (latar dan garis bawah). Di mobile, sisa tautan header menjadi satu baris yang bisa digeser sendiri, tidak lagi terbungkus dua baris. Halaman tidak ikut bergeser ke samping, dan teks "Duit Log" disembunyikan secara visual.
+- Di mobile, kartu halaman tampil rata tanpa bingkai agar lebih lebar.
+- Navigasi bawah diberi ikon SVG `aria-hidden` dan slot aktif berbentuk pil.
+- Saldo dan piutang di Beranda tampil sebagai kartu bertint. Statistik Beranda dan ringkasan Laporan memakai grid kartu.
+- Nominal di Beranda dan Riwayat memakai angka tabular. Warnanya hijau untuk + dan merah untuk −; tanda +/− tetap menjadi penanda utama.
+- Form periode Laporan memakai grid yang menyesuaikan lebar. Sebelumnya form ini meluap ke samping di layar 375px.
+- Aksi yang berdiri sendiri kini tombol berbingkai, bukan tautan teks: Ganti nama, Arsipkan, Aktifkan kembali, Batal, Hapus filter, dan Ubah target. Tautan di tengah kalimat (Coba lagi, Lupa PIN, dll.) tetap tautan.
+- Laporan: tiga tombol jenis laporan diganti dropdown `#family` ("Jenis laporan") yang langsung berlaku saat diganti. Dropdown ini ada di panel filter yang bisa dilipat, bersama periode dan tanggal, dan ringkasan panel menampilkan pilihan yang aktif. Filter Riwayat memakai panel yang sama dengan kolom ganda. Semua `<summary>` diberi chevron.
+- Logo: halaman buku besar (garis catatan) dengan koin, dibuat sebagai SVG inline yang mengikuti token tema, plus `public/favicon.svg`.
+
 ## Verifikasi
 
 `tests/phase5_ui.py` dijalankan oleh `--offline`. Semua langkah lewat UI sungguhan: klik tautan, isi field, submit. Tidak ada hook DEV.

@@ -89,25 +89,29 @@ const pick = (next: Family) => router.replace({ query: { ...route.query, family:
     <h1 id="page-title">Laporan</h1>
     <p class="intro">Hanya transaksi terkonfirmasi di server. Item yang belum tersinkron dan transaksi terhapus tidak
       termasuk. Tanggal mengikuti zona waktu akun {{ accountZone() }}.</p>
-    <nav class="tabs" aria-label="Jenis laporan">
-      <button v-for="(name, key) in FAMILIES" :key="key" type="button" :aria-pressed="family === key"
-        :class="family === key ? 'primary' : 'secondary'" @click="pick(key)">{{ name }}</button>
-    </nav>
-
-    <form class="inline" novalidate @submit.prevent="load">
-      <label for="period">Periode</label>
-      <select id="period" v-model="period">
-        <option v-for="(name, key) in PERIODS" :key="key" :value="key">{{ name }}</option>
-      </select>
+    <details class="panel" data-report-filter>
+      <summary>Filter: {{ FAMILIES[family] }} · {{ PERIODS[period] }}</summary>
+    <form class="filters" novalidate @submit.prevent="load">
+      <div>
+        <label for="family">Jenis laporan</label>
+        <select id="family" :value="family" @change="pick(($event.target as HTMLSelectElement).value as Family)">
+          <option v-for="(name, key) in FAMILIES" :key="key" :value="key">{{ name }}</option>
+        </select>
+      </div>
+      <div>
+        <label for="period">Periode</label>
+        <select id="period" v-model="period">
+          <option v-for="(name, key) in PERIODS" :key="key" :value="key">{{ name }}</option>
+        </select>
+      </div>
       <template v-if="period === 'custom'">
-        <label for="from">Dari</label><input id="from" v-model="from" type="date" :max="today">
-        <label for="to">Sampai</label><input id="to" v-model="to" type="date" :max="today">
+        <div><label for="from">Dari</label><input id="from" v-model="from" type="date" :max="today"></div>
+        <div><label for="to">Sampai</label><input id="to" v-model="to" type="date" :max="today"></div>
       </template>
-      <template v-else>
-        <label for="date">Tanggal dalam periode</label><input id="date" v-model="date" type="date" :max="today">
-      </template>
+      <div v-else><label for="date">Tanggal dalam periode</label><input id="date" v-model="date" type="date" :max="today"></div>
       <button class="secondary" :disabled="busy">Tampilkan</button>
     </form>
+    </details>
 
     <div role="status" aria-live="polite">
       <p v-if="error" class="notice error" data-report-error>{{ error }}</p>
@@ -119,7 +123,7 @@ const pick = (next: Family) => router.replace({ query: { ...route.query, family:
         Dibandingkan dengan {{ rangeLabel(ie.comparison) }}</template>.</p>
 
       <template v-if="ie">
-        <dl class="details" data-report-summary>
+        <dl class="details stats" data-report-summary>
           <div><dt>Pemasukan</dt><dd data-income>{{ rupiah(ie.current.income) }} · {{ changeText(ie.change.income) }}</dd></div>
           <div><dt>Pengeluaran</dt><dd data-expense>{{ rupiah(ie.current.expense) }} · {{ changeText(ie.change.expense) }}</dd></div>
           <div><dt>Selisih bersih</dt><dd data-net>{{ rupiah(ie.current.net) }} · {{ changeText(ie.change.net) }}</dd></div>

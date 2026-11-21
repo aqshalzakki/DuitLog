@@ -83,7 +83,7 @@ async function save() {
           pindah ke tanggal atau bulan lain. Waktu transaksi yang tersimpan, saldo, dan piutang tidak berubah.</p>
         <div class="actions">
           <button type="button" class="secondary" :disabled="busy" @click="save">Ya, ubah zona waktu</button>
-          <button type="button" class="link-button" :disabled="busy" @click="confirming = false">Batal</button>
+          <button type="button" class="secondary" :disabled="busy" @click="confirming = false">Batal</button>
         </div>
       </div>
     </template>

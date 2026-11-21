@@ -147,7 +147,7 @@ async function toggle() {
         <p class="hint">Nama boleh sama dengan peminjam lain. Riwayat dan sisa piutang tidak berubah.</p>
         <div class="actions">
           <button class="secondary" :disabled="busy">Simpan profil</button>
-          <button type="button" class="link-button" :disabled="busy" @click="editing = false">Batal</button>
+          <button type="button" class="secondary" :disabled="busy" @click="editing = false">Batal</button>
         </div>
       </form>
       <p v-if="borrower.archived" class="hint">Aktifkan kembali untuk mencatat pinjaman atau pembayaran baru.</p>

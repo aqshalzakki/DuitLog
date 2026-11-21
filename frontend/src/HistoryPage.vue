@@ -101,30 +101,32 @@ const sign = (row: Row) => (row.kind === 'DEDUCT' || row.kind === 'LOAN' ? '−'
     </template>
 
     <h2 v-if="!deleted && waiting.length">Tercatat</h2>
-    <details v-if="online" :open="filtering">
+    <details v-if="online" class="panel" :open="filtering">
       <summary>Cari dan filter</summary>
       <form novalidate data-history-filter @submit.prevent="search">
         <label for="q">Cari judul atau deskripsi</label>
         <input id="q" v-model="filter.q" type="search" maxlength="100" autocomplete="off">
-        <label for="kind">Jenis</label>
+        <div class="filters">
+        <div><label for="kind">Jenis</label>
         <select id="kind" v-model="filter.kind">
           <option value="">Semua jenis</option>
           <option v-for="(name, key) in KINDS" :key="key" :value="key">{{ name }}</option>
-        </select>
-        <label for="category">Kategori</label>
+        </select></div>
+        <div><label for="category">Kategori</label>
         <select id="category" v-model="filter.category">
           <option value="">Semua kategori</option>
           <option value="none">Tanpa kategori</option>
           <option v-for="c in categories" :key="c.id" :value="c.id">{{ c.name }}{{ c.archived ? ' (diarsipkan)' : '' }}</option>
-        </select>
-        <fieldset class="plain">
+        </select></div>
+        <fieldset class="plain filters">
           <legend class="visually-hidden">Tanggal efektif</legend>
-          <label for="from">Dari tanggal</label><input id="from" v-model="filter.from" type="date">
-          <label for="to">Sampai tanggal</label><input id="to" v-model="filter.to" type="date">
+          <div><label for="from">Dari tanggal</label><input id="from" v-model="filter.from" type="date"></div>
+          <div><label for="to">Sampai tanggal</label><input id="to" v-model="filter.to" type="date"></div>
         </fieldset>
+        </div>
         <div class="actions">
           <button class="secondary" :disabled="busy">Terapkan</button>
-          <button v-if="filtering" type="button" class="link-button" :disabled="busy" @click="reset">Hapus filter</button>
+          <button v-if="filtering" type="button" class="secondary" :disabled="busy" @click="reset">Hapus filter</button>
         </div>
       </form>
       <p class="hint">Filter berlaku untuk transaksi tercatat; yang belum tersinkron tetap tampil di atas.</p>
@@ -143,7 +145,7 @@ const sign = (row: Row) => (row.kind === 'DEDUCT' || row.kind === 'LOAN' ? '−'
           <p>{{ KINDS[row.kind] }} · {{ formatTime(row.effectiveAt) }}<template v-if="borrower(row.borrowerId)"> · {{ borrower(row.borrowerId) }}</template>
             <template v-if="row.affectCashBalance === false"> · Tidak memengaruhi saldo</template></p>
         </div>
-        <span>{{ row.amount ? sign(row) + rupiah(row.amount) : 'Target ' + rupiah(row.targetBalance) }}</span>
+        <span :class="['amt', row.amount ? (sign(row) === '+' ? 'in' : 'out') : '']">{{ row.amount ? sign(row) + rupiah(row.amount) : 'Target ' + rupiah(row.targetBalance) }}</span>
       </li>
     </ul>
     <button v-if="next !== null" type="button" class="secondary" :disabled="busy" @click="page(true)">Muat lagi</button>

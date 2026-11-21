@@ -59,7 +59,7 @@ async function strongUnlock() {
 <template>
   <a class="skip-link" href="#content">Langsung ke konten</a>
   <header class="topbar">
-    <RouterLink to="/" class="wordmark"><span aria-hidden="true">D</span>Duit Log</RouterLink>
+    <RouterLink to="/" class="wordmark"><svg class="logo" aria-hidden="true" viewBox="0 0 32 32"><rect width="32" height="32" rx="8" class="logo-bg"/><path class="logo-lines" d="M8 10h12M8 15h9M8 20h5"/><circle class="logo-coin" cx="21.5" cy="21.5" r="5.5"/></svg><span class="wordmark-text">Duit Log</span></RouterLink>
     <nav v-if="auth.profile || offline" aria-label="Utama">
       <template v-if="auth.profile?.emailVerified || offline">
         <RouterLink class="in-bottom" to="/">Beranda</RouterLink>
@@ -101,8 +101,8 @@ async function strongUnlock() {
     </RouterView>
   </main>
   <nav v-if="auth.profile?.emailVerified || offline" class="bottom-nav" aria-label="Navigasi bawah" data-bottom-nav>
-    <RouterLink to="/">Beranda</RouterLink>
-    <RouterLink to="/history">Transaksi</RouterLink>
+    <RouterLink to="/"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg>Beranda</RouterLink>
+    <RouterLink to="/history"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M9 6h12M9 12h12M9 18h12M4 6h.01M4 12h.01M4 18h.01"/></svg>Transaksi</RouterLink>
     <div ref="addArea" class="add" @keydown.esc="closeAdd">
       <button ref="addButton" type="button" aria-controls="add-menu" :aria-expanded="adding"
         @click="adding = !adding"><span aria-hidden="true">+</span> Tambah</button>
@@ -113,7 +113,7 @@ async function strongUnlock() {
         <li><RouterLink to="/add/repayment">Terima pembayaran</RouterLink></li>
       </ul>
     </div>
-    <RouterLink to="/borrowers">Piutang</RouterLink>
-    <RouterLink v-if="auth.profile?.emailVerified" to="/reports">Laporan</RouterLink>
+    <RouterLink to="/borrowers"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM2 21a7 7 0 0 1 14 0M16 3.5a4 4 0 0 1 0 7.5M22 21a7 7 0 0 0-4-6.3"/></svg>Piutang</RouterLink>
+    <RouterLink v-if="auth.profile?.emailVerified" to="/reports"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 20V11M10 20V4M16 20v-7M21 20H3"/></svg>Laporan</RouterLink>
   </nav>
 </template>

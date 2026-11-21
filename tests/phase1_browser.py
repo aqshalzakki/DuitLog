@@ -50,7 +50,7 @@ def run_chrome(browser, env, origin, work, mail):
                 result = cdp("Runtime.evaluate", expression=expression,
                              returnByValue=True, awaitPromise=True)
                 if "exceptionDetails" in result:
-                    raise RuntimeError("Browser expression failed")
+                    raise RuntimeError("Browser expression failed: " + json.dumps(result["exceptionDetails"])[:600])
                 return result["result"].get("value")
 
             def see(expression):
@@ -95,8 +95,9 @@ def run_chrome(browser, env, origin, work, mail):
             submit()
             # Verified: lands on Beranda, which sends a new account to its opening balance.
             see("location.pathname === '/onboarding'")
+            js("window.beforeReload = true")  # Page.reload returns before the new document; never check the old one
             cdp("Page.reload")
-            see("location.pathname === '/onboarding' && !!document.querySelector('a[href=\"/account\"]')")
+            see("!window.beforeReload && location.pathname === '/onboarding' && !!document.querySelector('a[href=\"/account\"]')")
             js("""document.querySelector('a[href="/account"]').click()""")
             see("location.pathname === '/account' && document.querySelector('main')?.textContent.includes('Browser test')")
             check(js("document.cookie.includes('duit-access') || document.cookie.includes('duit-refresh')"), False)

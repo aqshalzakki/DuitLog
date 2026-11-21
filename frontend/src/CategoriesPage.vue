@@ -85,13 +85,13 @@ const toggle = (c: Category) => run(c.id, `/categories/${c.id}/${c.archived ? 'r
             <label :for="'rename-' + c.id" class="visually-hidden">Nama baru untuk {{ c.name }}</label>
             <input :id="'rename-' + c.id" v-model="rename" autocomplete="off" maxlength="60">
             <button class="secondary" :disabled="busy">Simpan</button>
-            <button type="button" class="link-button" @click="editing = undefined">Batal</button>
+            <button type="button" class="secondary small" @click="editing = undefined">Batal</button>
           </form>
           <template v-else>
             <strong>{{ c.name }}</strong>
-            <div class="row-end">
-              <button type="button" class="link-button" @click="startRename(c)">Ganti nama</button>
-              <button type="button" class="link-button" :disabled="busy" @click="toggle(c)">Arsipkan</button>
+            <div class="row-actions">
+              <button type="button" class="secondary small" @click="startRename(c)">Ganti nama</button>
+              <button type="button" class="secondary small" :disabled="busy" @click="toggle(c)">Arsipkan</button>
             </div>
           </template>
         </li>
@@ -102,7 +102,7 @@ const toggle = (c: Category) => run(c.id, `/categories/${c.id}/${c.archived ? 'r
         <ul class="recent">
           <li v-for="c in archived" :key="c.id" :data-category="c.name">
             <strong>{{ c.name }}</strong>
-            <button type="button" class="link-button" :disabled="busy" @click="toggle(c)">Aktifkan kembali</button>
+            <button type="button" class="secondary small" :disabled="busy" @click="toggle(c)">Aktifkan kembali</button>
           </li>
         </ul>
       </template>
