@@ -40,5 +40,11 @@ python -B tests/phase1_auth.py --financial
 | `cargo clippy --locked --all-targets -- -D warnings` | Lulus. |
 | `cargo test --locked` | 4 uji domain lulus: replay snapshot, prefix piutang dan dependensi, overflow uang, proyeksi kas acak. |
 | `python -B tests/phase1_auth.py --financial` | Lulus pada MySQL 8.x sementara: opening/skip, backdate sebelum snapshot, tie timestamp, adjustment, edit/delete/restore dengan versi, kategori diarsipkan, piutang negatif ditolak, arsip/reaktivasi borrower dengan audit, waktu masa depan, overflow, idempotensi dan lookup operasi, dua tulis paralel, rollback saat audit gagal, integrity freeze dan unfreeze operator, recovery hold global, isolasi pemilik. |
+| `tests/phase2_stress.py` (bagian dari suite di atas) | Lulus untuk seed 20261121, 1, 2, 3. 60 langkah acak per seed (backdate, tie dengan snapshot, adjustment, loan/repayment dengan toggle kas, edit/delete/restore) dicocokkan dengan model Python independen setelah setiap langkah, termasuk penolakan `RECEIVABLE_NEGATIVE` tanpa efek. Akhir run memeriksa outstanding per borrower, target dan delta setiap snapshot, serta `finance_operator reconcile` → `frozen=false`. Uji mutasi: model yang sengaja dirusak membuat suite gagal. |
+| Konkurensi | 40 deduct oleh 8 thread: sequence unik dan berurutan, saldo tepat. 6 thread dengan `attemptId` sama: respons identik, efek sekali. 6 repayment berebut satu loan: tepat 3 diterima, 3 `RECEIVABLE_NEGATIVE`, outstanding tepat. |
+| Lock ditahan (MySQL 1205) | Row akun dikunci sesi lain: request menunggu dua kali 2 detik lalu 503 `TEMPORARY_FAILURE` dengan `retryable`. Operasi tidak tercatat, state tidak berubah, user lain tetap bisa menulis. Setelah lock lepas, attempt yang sama diterima sekali. |
+| `cargo build --locked --release` | Lulus di Windows. |
 
-Belum dijalankan: `cargo build --release`, uji deadlock yang disuntikkan, property test di atas MySQL, serta beban konkurensi lebih dari dua penulis.
+Seed lain: `$env:DUIT_FIN_SEED=<angka>` sebelum menjalankan suite.
+
+Belum dijalankan: deadlock sejati (MySQL 1213) yang disuntikkan, beban di atas 8 penulis atau pada VPS 2 GB, serta kehilangan koneksi tepat saat commit (outcome unknown).

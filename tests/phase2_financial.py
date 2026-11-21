@@ -165,13 +165,15 @@ def financial_test(database, env, mail, port, origin):
     operator = ROOT / "target/debug/finance_operator.exe"
     operator_env = dict(env, DUIT_FINANCE_OPERATOR_DATABASE_URL=env["DATABASE_URL"],
                         DUIT_FINANCE_OPERATOR_ACTOR="fixture", DUIT_FINANCE_OPERATOR_REASON="verification fixture")
-    def run_operator(action):
-        return subprocess.run([operator, action, aid], env=operator_env, check=True,
+    def run_operator(action, owner=aid):
+        return subprocess.run([operator, action, owner], env=operator_env, check=True,
                               capture_output=True, text=True, timeout=15).stdout.strip()
     check(run_operator("unfreeze"), "frozen=true")
     use_db(database, f"UPDATE financial_accounts SET balance=balance-1 WHERE owner_id='{aid}';")
     check(run_operator("unfreeze"), "frozen=false")
     check(alice.request("GET", "/integrity-status", 200)["frozen"], False)
+    from phase2_stress import stress_test
+    stress_test(database, mail, port, origin, bob, run_operator)
     use_db(database, "UPDATE financial_recovery SET active=TRUE WHERE id=1;")
     operation(alice, "/activities", input_a, status=503, code="FINANCIAL_RECOVERY_ACTIVE")
     operation(bob, "/activities", input_a, status=503, code="FINANCIAL_RECOVERY_ACTIVE")

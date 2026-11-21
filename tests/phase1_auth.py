@@ -134,7 +134,7 @@ class Client:
         self.cookies = {}
         self.set_cookies = []
 
-    def request(self, method, path, status, *, data=None, csrf=True, origin=None):
+    def request(self, method, path, status, *, data=None, csrf=True, origin=None, full=False):
         headers = {"Cookie": "; ".join(f"{key}={value}" for key, value in self.cookies.items())}
         if csrf:
             headers.update({"Origin": origin or self.origin, "X-Duit-CSRF": "1"})
@@ -161,6 +161,8 @@ class Client:
             if response.status >= 400:
                 assert set(("code", "message", "requestId")).issubset(value)
                 assert PASSWORD not in raw.decode()
+            if full:
+                return response.status, value
             return response.status if isinstance(status, tuple) else value
         finally:
             conn.close()
