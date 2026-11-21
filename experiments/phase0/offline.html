@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Duit Log offline storage experiment</title>
+<p id="status" role="status">Running experiment</p>
+<script type="module">
+const { subtle } = crypto;
+const encode = (s) => new TextEncoder().encode(s);
+const random = (length) => crypto.getRandomValues(new Uint8Array(length));
+const aes = { name: 'AES-GCM', length: 256 };
+const context = (owner, id, type) => encode(JSON.stringify([owner, 'test-device', 1, id, type]));
+const gcm = (iv, additionalData) => ({ name: 'AES-GCM', iv, additionalData });
+const record = (id, type, content) => ({ id, type, content });
+const fixtures = [
+  record('draft-1', 'draft', 'synthetic draft'),
+  record('pending-1', 'pending', '9007199254740993'),
+  record('attachment-1', 'evidence', 'synthetic attachment bytes'),
+];
+// Fixed inputs are test fixtures so a second browser process can reproduce unlock.
+const phrase = 'synthetic experiment passphrase with no real data';
+const recovery = Uint8Array.from({ length: 32 }, (_, i) => i);
+const owner = 'test-owner';
+const iterations = 600_000;
+const param = (kind, iv) => gcm(iv, context(owner, kind, 'wrapper'));
+
+function assert(value, message) {
+  if (!value) throw new Error(message);
+}
+
+async function rejects(operation, label) {
+  try {
+    await operation;
+  } catch (error) {
+    assert(error.name === 'OperationError', label + ' unexpected error');
+    return;
+  }
+  throw new Error(label + ' unexpectedly decrypted');
+}
+
+async function passphraseKey(value, salt) {
+  const material = await subtle.importKey('raw', encode(value), 'PBKDF2', false, ['deriveKey']);
+  return subtle.deriveKey({ name: 'PBKDF2', salt, iterations, hash: 'SHA-256' },
+    material, aes, false, ['wrapKey', 'unwrapKey']);
+}
+
+function recoveryKey(value) {
+  return subtle.importKey('raw', value, aes, false, ['wrapKey', 'unwrapKey']);
+}
+
+function openDb() {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open('duit-phase0', 1);
+    request.onupgradeneeded = () => request.result.createObjectStore('fixture');
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => resolve(request.result);
+  });
+}
+
+function transaction(db, mode, operation, abort = false) {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('fixture', mode);
+    const request = operation(tx.objectStore('fixture'));
+    tx.oncomplete = () => resolve(request.result);
+    tx.onabort = () => reject(tx.error ?? new DOMException('aborted', 'AbortError'));
+    if (abort) tx.abort();
+  });
+}
+
+async function seed(db) {
+  const dek = await subtle.generateKey(aes, true, ['encrypt']);
+  const salt = random(16);
+  const passIv = random(12);
+  const recoveryIv = random(12);
+  const started = performance.now();
+  const passKey = await passphraseKey(phrase, salt);
+  const kdfMs = Math.round(performance.now() - started);
+  const pass = await subtle.wrapKey('raw', dek, passKey, param('passphrase', passIv));
+  const backup = await subtle.wrapKey('raw', dek, await recoveryKey(recovery), param('recovery', recoveryIv));
+  const records = [];
+  for (const { id, type, content } of fixtures) {
+    const iv = random(12);
+    const bytes = await subtle.encrypt(gcm(iv, context(owner, id, type)), dek, encode(content));
+    records.push({ id, type, iv, bytes });
+  }
+  const envelope = { salt, passIv, recoveryIv, pass, backup, records };
+  await transaction(db, 'readwrite', (store) => store.add(envelope, 'owner-device'));
+  try {
+    await transaction(db, 'readwrite', (store) => store.put(null, 'owner-device'), true);
+    throw new Error('fixture overwrite unexpectedly committed');
+  } catch (error) {
+    assert(error.name === 'AbortError', 'expected controlled storage abort');
+  }
+  return { case: 'commit, aborted overwrite', kdfMs };
+}
+
+async function restore(db) {
+  const { salt, passIv, recoveryIv, pass, backup, records } =
+    await transaction(db, 'readonly', (store) => store.get('owner-device'));
+  const unwrap = (wrapped, key, kind, iv) =>
+    subtle.unwrapKey('raw', wrapped, key, param(kind, iv), aes, false, ['decrypt']);
+  await rejects(unwrap(pass, await passphraseKey('123456', salt), 'passphrase', passIv), 'PIN');
+  await rejects(unwrap(backup, await recoveryKey(random(32)), 'recovery', recoveryIv), 'wrong recovery key');
+  const decrypt = ({ id, type, iv, bytes }, key, account) =>
+    subtle.decrypt(gcm(iv, context(account, id, type)), key, bytes);
+  const passDek = await unwrap(pass, await passphraseKey(phrase, salt), 'passphrase', passIv);
+  const recoveryDek = await unwrap(backup, await recoveryKey(recovery), 'recovery', recoveryIv);
+  assert(!passDek.extractable && !recoveryDek.extractable, 'unwrapped DEK must be non-extractable');
+  for (const key of [passDek, recoveryDek]) {
+    for (const [index, entry] of records.entries()) {
+      const plaintext = await decrypt(entry, key, owner);
+      assert(new TextDecoder().decode(plaintext) === fixtures[index].content, 'restored record mismatch');
+    }
+  }
+  await rejects(decrypt(records[0], recoveryDek, 'other-owner'), 'foreign owner AAD');
+  const corruptedBytes = new Uint8Array(records[0].bytes);
+  corruptedBytes[0] ^= 1;
+  await rejects(decrypt({ ...records[0], bytes: corruptedBytes }, recoveryDek, owner), 'corrupted ciphertext');
+  return { case: 'restart, passphrase, recovery, PIN rejection, owner binding, tamper rejection' };
+}
+
+let result;
+try {
+  const db = await openDb();
+  try {
+    result = await (location.search === '?seed' ? seed(db) : restore(db));
+  } finally {
+    db.close();
+  }
+} catch (error) {
+  result = { error: error.message };
+}
+document.querySelector('#status').textContent = JSON.stringify(result);
+await fetch('/result', { method: 'POST', body: JSON.stringify(result) });
+</script>

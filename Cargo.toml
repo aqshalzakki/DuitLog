@@ -1,0 +1,4 @@
+[workspace]
+members = ["backend"]
+exclude = ["experiments/phase0/sqlx-probe", "experiments/phase0/resource-probe"]
+resolver = "3"

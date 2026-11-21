@@ -1,0 +1,11 @@
+[package]
+name = "duit-resource-probe"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+axum = { version = "=0.8.9", default-features = false, features = ["http1", "tokio"] }
+rust_xlsxwriter = { version = "=0.103.0", features = ["constant_memory"] }
+sqlx = { version = "=0.9.0", default-features = false, features = ["mysql", "runtime-tokio", "tls-native-tls"] }
+tokio = { version = "=1.54.1", features = ["fs", "macros", "net", "rt-multi-thread", "sync", "time"] }

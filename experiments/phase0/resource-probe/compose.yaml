@@ -1,0 +1,28 @@
+services:
+  db:
+    image: mysql:8.4@sha256:a81d043930e51745522bd5c430961cf8286f0a23f0a9a2a6e0108f7ea71b0902
+    command: ["--innodb-buffer-pool-size=256M", "--max-connections=24"]
+    environment:
+      MYSQL_ROOT_PASSWORD: "${DUIT_RESOURCE_PASSWORD:?}"
+      MYSQL_DATABASE: duit_resource
+      MYSQL_USER: probe
+      MYSQL_PASSWORD: "${DUIT_RESOURCE_PASSWORD:?}"
+    mem_limit: 1024m
+    memswap_limit: 1024m
+
+  api:
+    image: "${DUIT_RESOURCE_IMAGE:?}"
+    command: ["api"]
+    environment:
+      DUIT_RESOURCE_DB_URL: "mysql://probe:${DUIT_RESOURCE_PASSWORD:?}@db:3306/duit_resource?ssl-mode=required"
+    ports: ["127.0.0.1::8080"]
+    mem_limit: 256m
+    memswap_limit: 256m
+
+  worker:
+    image: "${DUIT_RESOURCE_IMAGE:?}"
+    command: ["worker"]
+    environment:
+      DUIT_RESOURCE_DB_URL: "mysql://probe:${DUIT_RESOURCE_PASSWORD:?}@db:3306/duit_resource?ssl-mode=required"
+    mem_limit: 256m
+    memswap_limit: 256m

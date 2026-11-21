@@ -1,0 +1,9 @@
+[package]
+name = "duit-sqlx-probe"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+sqlx = { version = "=0.9.0", default-features = false, features = ["mysql", "runtime-tokio", "macros", "tls-native-tls"] }
+tokio = { version = "=1.54.1", features = ["macros", "rt-multi-thread", "sync", "time"] }

@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Duit Log authenticator experiment</title>
+<p>Use a test authenticator. Enroll, close the browser, reopen the same URL and verify.</p>
+<label for="authenticator">Authenticator</label>
+<select id="authenticator">
+  <option value="">Choose in browser</option>
+  <option value="platform">Built-in authenticator</option>
+  <option value="cross-platform">External security key or phone</option>
+</select>
+<button id="enroll">Enroll test credential</button>
+<button id="verify">Verify after restart</button>
+<p id="status" role="status"></p>
+<script type="module">
+const random = (length) => crypto.getRandomValues(new Uint8Array(length));
+const { subtle } = crypto;
+const aes = { name: 'AES-GCM', length: 256 };
+const fixture = 'duit-phase0-test-authenticator';
+const encoder = new TextEncoder();
+const status = document.querySelector('#status');
+
+function wrappingAlgorithm(iv) {
+  return { name: 'AES-GCM', iv, additionalData: encoder.encode(fixture) };
+}
+
+async function accessStorage(mode, operation) {
+  const db = await new Promise((resolve, reject) => {
+    const request = indexedDB.open('duit-phase0-prf', 1);
+    request.onupgradeneeded = () => request.result.createObjectStore('fixture');
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => resolve(request.result);
+  });
+  try {
+    return await new Promise((resolve, reject) => {
+      const transaction = db.transaction('fixture', mode);
+      const request = operation(transaction.objectStore('fixture'));
+      transaction.oncomplete = () => resolve(request.result);
+      transaction.onabort = () => reject(transaction.error);
+    });
+  } finally {
+    db.close();
+  }
+}
+
+async function getPrf(id, salt) {
+  const credential = await navigator.credentials.get({ publicKey: {
+    challenge: random(32),
+    allowCredentials: [{ type: 'public-key', id: new Uint8Array(id) }],
+    userVerification: 'required',
+    extensions: { prf: { eval: { first: new Uint8Array(salt) } } },
+  } });
+  const bytes = credential.getClientExtensionResults().prf?.results?.first;
+  if (bytes?.byteLength !== 32) throw new Error('Authenticator returned no 32-byte PRF output');
+  return subtle.importKey('raw', bytes, aes, false, ['wrapKey', 'unwrapKey']);
+}
+
+async function enroll() {
+  const attachment = document.querySelector('#authenticator').value;
+  const authenticatorSelection = { userVerification: 'required' };
+  if (attachment) authenticatorSelection.authenticatorAttachment = attachment;
+  const credential = await navigator.credentials.create({ publicKey: {
+    challenge: random(32),
+    rp: { name: 'Duit Log synthetic experiment' },
+    user: { id: random(32), name: 'duit-test-only', displayName: 'Duit synthetic test' },
+    pubKeyCredParams: [{ type: 'public-key', alg: -7 }, { type: 'public-key', alg: -257 }],
+    authenticatorSelection,
+    extensions: { prf: {} },
+  } });
+  const enabled = credential.getClientExtensionResults().prf?.enabled;
+  const actualAttachment = credential.authenticatorAttachment ?? 'unknown';
+  if (enabled !== true) {
+    const result = enabled === false ? 'PRF disabled' : 'PRF result unavailable';
+    return `${result} (${actualAttachment}). Record this result for this browser and authenticator.`;
+  }
+  const id = credential.rawId;
+  const salt = random(32);
+  const iv = random(12);
+  const recordIv = random(12);
+  const key = await getPrf(id, salt);
+  const dek = await subtle.generateKey(aes, true, ['encrypt']);
+  const wrapper = await subtle.wrapKey('raw', dek, key, wrappingAlgorithm(iv));
+  const ciphertext = await subtle.encrypt(wrappingAlgorithm(recordIv), dek, encoder.encode(fixture));
+  const fixtures = { id, salt, iv, recordIv, wrapper, ciphertext };
+  await accessStorage('readwrite', (store) => store.put(fixtures, fixture));
+  return 'Enrolled. Close the browser before verifying.';
+}
+
+async function verify() {
+  const stored = await accessStorage('readonly', (store) => store.get(fixture));
+  if (!stored) throw new Error('Enroll the test credential first');
+  const { id, salt, iv, recordIv, wrapper, ciphertext } = stored;
+  const key = await getPrf(id, salt);
+  const dek = await subtle.unwrapKey('raw', new Uint8Array(wrapper), key,
+    wrappingAlgorithm(new Uint8Array(iv)), aes, false, ['decrypt']);
+  const plaintext = await subtle.decrypt(wrappingAlgorithm(new Uint8Array(recordIv)), dek,
+    new Uint8Array(ciphertext));
+  if (new TextDecoder().decode(plaintext) !== fixture) throw new Error('Fixture mismatch');
+  return 'PRF unwrapped the key and decrypted the stored fixture.';
+}
+
+for (const [id, operation] of [['enroll', enroll], ['verify', verify]]) {
+  document.querySelector('#' + id).addEventListener('click', async () => {
+    try {
+      status.textContent = await operation();
+    } catch (error) {
+      status.textContent = error.name + ' · ' + error.message;
+    }
+  });
+}
+</script>
