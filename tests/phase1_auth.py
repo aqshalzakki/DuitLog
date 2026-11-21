@@ -288,7 +288,9 @@ def main(browser, finance=False, offline=False):
     with tempfile.TemporaryDirectory(prefix="duit-phase1-", dir=ROOT) as workdir:
         work = Path(workdir)
         mysql_probe.WORK = work
-        with mysql_probe.Instance(work / "data", 121, available_port()).start() as database, smtp() as mail:
+        from phase6_evidence import evidence_test, init_bucket, object_storage
+        with mysql_probe.Instance(work / "data", 121, available_port()).start() as database, smtp() as mail, \
+                object_storage(work) as storage:
             password = uuid.uuid4().hex
             database.query(f"""CREATE DATABASE {DB}; CREATE USER 'duit_fixture'@'127.0.0.1'
                 IDENTIFIED BY '{password}' REQUIRE SSL; GRANT ALL ON {DB}.* TO 'duit_fixture'@'127.0.0.1';""")
@@ -300,12 +302,13 @@ def main(browser, finance=False, offline=False):
                        DUIT_MAIL_KEY=base64.urlsafe_b64encode(os.urandom(32)).decode().rstrip("="),
                        DUIT_APP_ORIGIN=origin, DUIT_API_ADDR=f"127.0.0.1:{api_port}",
                        DUIT_SMTP_MODE="local", DUIT_SMTP_HOST="127.0.0.1", DUIT_MAIL_FROM="duit@example.test",
-                       DUIT_SMTP_PORT=str(mail.server_address[1]))
+                       DUIT_SMTP_PORT=str(mail.server_address[1]), **storage["env"])
             api = ROOT / "target/debug/api.exe"
             for _ in range(2):
                 subprocess.run([api, "migrate"], env=env, check=True, timeout=30)
-            check(database.rows(f"USE {DB}; SELECT version FROM _sqlx_migrations WHERE success=1 ORDER BY version;"), ["1", "2", "3", "4"])
+            check(database.rows(f"USE {DB}; SELECT version FROM _sqlx_migrations WHERE success=1 ORDER BY version;"), ["1", "2", "3", "4", "5"])
             print("MySQL migration and repeat application OK", flush=True)
+            init_bucket(api, env)
             client = Client(api_port, origin)
             with process([api], env, work / "api.log"):
                 def ready():
@@ -324,6 +327,7 @@ def main(browser, finance=False, offline=False):
                     if finance:
                         from phase2_financial import financial_test
                         financial_test(database, env, mail, api_port, origin)
+                        evidence_test(database, mail, api_port, origin, storage)
                     if browser:
                         from phase1_browser import browser_test
                         browser_test(browser, env, origin, api_port, work, mail)

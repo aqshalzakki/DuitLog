@@ -251,6 +251,14 @@ details[open] > summary::after { margin-top: 0.2rem; transform: rotate(-135deg);
 .filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(8.5rem, 1fr)); gap: 0 0.75rem; align-items: end; }
 .filters button { min-height: 2.85rem; margin-top: 1rem; }
 .filters > fieldset { grid-column: 1 / -1; }
+.evidence { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 0.75rem; padding: 0.8rem 0.9rem; border: 1px solid var(--line); border-radius: 0.75rem; }
+.evidence p { margin: 0.15rem 0 0; color: var(--muted); font-size: 0.9rem; }
+.evidence strong { overflow-wrap: anywhere; }
+.evidence .state { color: var(--ink); font-weight: 650; }
+.evidence-preview { display: block; max-width: 100%; max-height: 28rem; margin-top: 0.75rem; border-radius: 0.75rem; border: 1px solid var(--line); }
+.file-button { display: inline-flex; align-items: center; margin: 0; cursor: pointer; }
+.file-button:focus-within { outline: 3px solid var(--focus); outline-offset: 3px; }
+.file-button.disabled { opacity: 0.7; cursor: wait; }
 .row-end { display: flex; flex-direction: column; align-items: flex-end; gap: 0.3rem; text-align: right; }
 .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 dialog { max-width: min(32rem, calc(100vw - 2rem)); }

@@ -1,8 +1,10 @@
 pub mod auth;
 mod crypto;
+pub mod evidence;
 pub mod financial;
 pub mod http;
 pub mod mail;
+pub mod storage;
 
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use sqlx::mysql::{MySqlPool, MySqlPoolOptions};

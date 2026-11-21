@@ -1,6 +1,6 @@
 use std::{env, net::SocketAddr, process::ExitCode};
 
-use duitlog::{auth::Auth, database, http, mail_key, origin, shutdown};
+use duitlog::{auth::Auth, database, http, mail_key, origin, shutdown, storage::Storage};
 
 #[tokio::main(worker_threads = 2)]
 async fn main() -> ExitCode {
@@ -13,8 +13,19 @@ async fn main() -> ExitCode {
 
 async fn run() -> Result<(), &'static str> {
     let mode = env::args().nth(1);
-    if mode.as_deref().is_some_and(|mode| mode != "migrate") {
-        return Err("Usage: api [migrate]");
+    if mode
+        .as_deref()
+        .is_some_and(|mode| mode != "migrate" && mode != "init-storage")
+    {
+        return Err("Usage: api [migrate|init-storage]");
+    }
+    let storage = Storage::from_env()?;
+    if mode.as_deref() == Some("init-storage") {
+        // Dev/test only: production pre-provisions the private bucket with least-privilege keys.
+        return storage
+            .ensure_bucket()
+            .await
+            .map_err(|_| "Storage bucket setup failed");
     }
     let db = database(4).await?;
     if mode.as_deref() == Some("migrate") {
@@ -29,6 +40,7 @@ async fn run() -> Result<(), &'static str> {
             .await
             .map_err(|_| "Auth initialization failed")?,
         origin()?,
+        storage,
     );
     let address: SocketAddr = env::var("DUIT_API_ADDR")
         .unwrap_or_else(|_| "127.0.0.1:3000".into())

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
-import { ACTIONS } from './messages'
+import { ACTIONS, EVIDENCE_REASONS } from './messages'
 import { formatTime, rupiah } from './money'
 import { useAuth } from './session'
 
@@ -8,7 +8,7 @@ type State = { balance: string; receivables: string }
 type Item = {
   id: number; actor: string; action: string; actionAt: string
   details: {
-    resourceId?: string; reason?: string; names?: string[]; before?: Record<string, unknown> | null; after?: Record<string, unknown> | null
+    resourceId?: string; reason?: string; names?: string[]; fileName?: string; before?: Record<string, unknown> | null; after?: Record<string, unknown> | null
     snapshotChanges?: { id: string; targetBalance: string; beforeDelta?: string; afterDelta?: string }[]
     borrowerChanges?: { after: { name: string }; automaticallyReactivated: boolean }[]
     stateBefore?: State; stateAfter?: State
@@ -50,7 +50,8 @@ function changes(item: Item) {
   return Object.keys(FIELDS).filter((key) => JSON.stringify(before[key]) !== JSON.stringify(after[key]))
     .map((key) => ({ key, label: FIELDS[key], from: show(before[key], key), to: show(after[key], key) }))
 }
-const activity = (item: Item) => item.action.startsWith('ACTIVITY_') || item.action === 'BALANCE_ADJUSTMENT'
+const activity = (item: Item) => item.action.startsWith('ACTIVITY_') || item.action.startsWith('EVIDENCE_')
+  || item.action === 'BALANCE_ADJUSTMENT'
   || item.action === 'OPENING_BALANCE'
 </script>
 
@@ -63,8 +64,10 @@ const activity = (item: Item) => item.action.startsWith('ACTIVITY_') || item.act
       <li v-for="item in items" :key="item.id" :data-action="item.action">
         <div>
           <strong>{{ ACTIONS[item.action] ?? item.action }}</strong>
-          <p>{{ formatTime(item.actionAt) }}<template v-if="item.actor !== auth.profile?.id"> · Operator: {{ item.actor }}</template></p>
-          <p v-if="item.details.reason">Alasan: {{ item.details.reason }}</p>
+          <p>{{ formatTime(item.actionAt) }}<template v-if="item.actor.startsWith('system:')"> · Sistem</template><template
+            v-else-if="item.actor !== auth.profile?.id"> · Operator: {{ item.actor }}</template></p>
+          <p v-if="item.details.fileName">Berkas: {{ item.details.fileName }}</p>
+          <p v-if="item.details.reason">Alasan: {{ EVIDENCE_REASONS[item.details.reason] ?? item.details.reason }}</p>
           <p v-if="item.details.names">{{ item.details.names.join(', ') }}</p>
           <p v-for="c in changes(item)" :key="c.key">{{ c.label }}: {{ c.from }} → {{ c.to }}</p>
           <p v-if="item.details.stateBefore && item.details.stateAfter">

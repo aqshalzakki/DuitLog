@@ -283,6 +283,8 @@ def offline_test(browser, env, origin, api_port, work, mail):
         slice6_test(chrome, origin, api_port, mail)
         from phase5_slice7 import slice7_test
         slice7_test(chrome, origin, api_port, mail)
+        from phase6_evidence import evidence_ui_test
+        evidence_ui_test(chrome, origin, api_port, mail)
 
 
 def run(chrome, origin, api_port, mail):

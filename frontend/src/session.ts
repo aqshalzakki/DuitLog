@@ -20,14 +20,16 @@ export type Device = {
 export class ApiError extends Error {
   constructor(
     readonly status: number,
-    value: { code?: string; message?: string; fieldErrors?: Record<string, string> },
+    value: { code?: string; message?: string; fieldErrors?: Record<string, string>; conflictDetails?: Record<string, unknown> },
   ) {
     super(value.message ?? 'Permintaan gagal diproses.')
     this.fields = value.fieldErrors ?? {}
+    this.details = value.conflictDetails
     this.code = typeof value.code === 'string' ? value.code : undefined
   }
 
   readonly fields: Record<string, string>
+  readonly details: Record<string, unknown> | undefined
   /** Present only when the app itself answered; a proxy error or timeout carries none. */
   readonly code: string | undefined
 }

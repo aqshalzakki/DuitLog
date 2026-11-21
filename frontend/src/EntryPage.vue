@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { ACCEPT, checkFile, evidenceError, sizeText, uploadEvidence } from './evidence'
 import { check, newOp, send, useEntries, useFinance } from './finance'
 import { REASONS } from './messages'
 import { KINDS, accountZone, instant, localInput, parseAmount, rupiah } from './money'
@@ -28,6 +29,33 @@ const errors = ref<Record<string, string>>({})
 
 const viaVault = computed(() => vault.status === 'unlocked' && !vault.expired)
 const online = computed(() => !!auth.profile?.emailVerified)
+// Evidence goes up only after the activity is confirmed online (BR-FILE-04); a queued offline item has no
+// server id yet, so there the file is attached later from the transaction detail.
+const direct = computed(() => online.value && !viaVault.value && !editId && !fixId)
+const evidenceFile = ref<File>()
+const evidenceUpload = ref('') // one upload id per chosen file, reused by "Coba lagi"
+const evidenceState = ref<{ tone: string; text: string; retry?: boolean }>()
+
+function pickEvidence(event: Event) {
+  const file = (event.target as HTMLInputElement).files?.[0]
+  const problem = file && checkFile(file)
+  errors.value = { ...errors.value, evidence: problem ?? '' }
+  evidenceFile.value = file && !problem ? file : undefined
+  evidenceUpload.value = crypto.randomUUID()
+  if (problem) (event.target as HTMLInputElement).value = ''
+}
+
+async function attachEvidence() {
+  const activityId = draft.op?.result?.resourceId
+  if (!evidenceFile.value || !activityId) return
+  evidenceState.value = { tone: 'info', text: 'Mengunggah bukti…' }
+  try {
+    await uploadEvidence(activityId, evidenceFile.value, evidenceUpload.value)
+    evidenceState.value = { tone: 'success', text: 'Bukti diunggah dan sedang diperiksa sebelum bisa dibuka.' }
+  } catch (error) {
+    evidenceState.value = { tone: 'error', text: evidenceError(error), retry: true }
+  }
+}
 
 function fresh(): Record<string, string | boolean> {
   return { amount: '', when: localInput(), title: '', description: '', categoryId: '', borrower: '', affect: true,
@@ -147,7 +175,10 @@ async function save() {
       if (!draft.op || draft.op.state !== 'rejected') draft.op = newOp('/activities')
       draft.op.body = body
       await send(draft.op)
-      if (draft.op.state === 'confirmed') void finance.load()
+      if (draft.op.state === 'confirmed') {
+        void finance.load()
+        await attachEvidence()
+      }
     } else {
       failure.value = 'Sedang offline. Buka Akses Offline untuk menyimpan transaksi di perangkat ini.'
     }
@@ -207,6 +238,7 @@ function again() {
   // New ids come with the next save; a reload would be a Hard Lock, so reset in place.
   Object.assign(f, fresh())
   draft.op = draft.borrowerOp = draft.queued = undefined
+  evidenceFile.value = evidenceState.value = undefined
   errors.value = {}
   failure.value = ''
 }
@@ -243,6 +275,13 @@ const done = computed(() => !!draft.queued || draft.op?.state === 'confirmed')
       <div v-if="result" class="notice" :class="result.tone" data-entry-result>
         <strong>{{ result.title }}</strong>
         <p>{{ result.text }}</p>
+      </div>
+      <div v-if="evidenceState" class="notice" :class="evidenceState.tone" data-entry-evidence>
+        <p>{{ evidenceState.text }}</p>
+        <div v-if="evidenceState.retry" class="actions">
+          <button type="button" class="secondary small" @click="attachEvidence">Coba unggah lagi</button>
+          <RouterLink v-if="draft.op?.result?.resourceId" :to="'/activity/' + draft.op.result.resourceId">Buka detail</RouterLink>
+        </div>
       </div>
     </div>
     <p v-if="!viaVault && !online" class="notice error" role="alert">
@@ -302,6 +341,15 @@ const done = computed(() => !!draft.queued || draft.op?.state === 'confirmed')
           </template>
           <label for="description">Deskripsi</label>
           <textarea id="description" v-model="f.description" rows="3" maxlength="1000"></textarea>
+          <template v-if="direct">
+            <label for="evidence">Bukti (opsional)</label>
+            <input id="evidence" type="file" :accept="ACCEPT" :aria-invalid="!!errors.evidence"
+              :aria-describedby="errors.evidence ? 'evidence-error' : 'evidence-hint'" @change="pickEvidence">
+            <p v-if="errors.evidence" id="evidence-error" class="field-error">{{ errors.evidence }}</p>
+            <p v-else id="evidence-hint" class="hint">{{ evidenceFile ? evidenceFile.name + ' · ' + sizeText(evidenceFile.size)
+              : 'JPG, PNG, WebP, atau PDF, maksimal 10 MB. Diunggah setelah transaksi tercatat.' }}</p>
+          </template>
+          <p v-else-if="!editId && !fixId" class="hint">Bukti bisa dilampirkan dari detail transaksi setelah tercatat di server.</p>
         </details>
         <button class="primary">{{ fixId ? 'Simpan perbaikan' : editId ? 'Simpan perubahan' : 'Simpan' }}</button>
       </fieldset>

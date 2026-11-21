@@ -1,6 +1,7 @@
 """Run Duit Log locally for manual testing in a browser: a private MySQL in .dev-local/ (kept between
-runs, bound to 127.0.0.1 only), a fake SMTP relay that prints verification/reset codes to this terminal,
-the API, the worker and Vite at http://localhost:5173. Ctrl+C stops everything. Development only:
+runs, bound to 127.0.0.1 only), S3 storage for evidence (SeaweedFS in Docker, data in .dev-local/s3),
+a fake SMTP relay that prints verification/reset codes to this terminal, the API, the worker and Vite at
+http://localhost:5173. Ctrl+C stops everything. Development only:
 the MySQL root account has no password and must never hold real data.
 
     python tests/dev_local.py          start (first run initializes the database)
@@ -27,7 +28,8 @@ import uuid
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA = ROOT / ".dev-local"
-MYSQL_PORT, API_PORT, WEB_PORT = 3307, 3000, 5173
+MYSQL_PORT, API_PORT, WEB_PORT, S3_PORT = 3307, 3000, 5173, 8333
+S3_IMAGE, S3_CONTAINER = "chrislusf/seaweedfs:4.53", "duitlog-dev-s3"
 DB = "duitlog"
 MAILS = []
 
@@ -96,7 +98,8 @@ def main():
     if not mysqld:
         raise SystemExit("mysqld tidak ditemukan di PATH (MySQL 8.x).")
     mysqld = Path(mysqld).resolve()
-    for port, name, host in ((MYSQL_PORT, "MySQL", "127.0.0.1"), (API_PORT, "API", "127.0.0.1"), (WEB_PORT, "Vite", "localhost")):
+    for port, name, host in ((MYSQL_PORT, "MySQL", "127.0.0.1"), (API_PORT, "API", "127.0.0.1"), (WEB_PORT, "Vite", "localhost"),
+                             (S3_PORT, "S3", "127.0.0.1")):
         if not free(port, host):
             raise SystemExit(f"Port {port} ({name}) sedang dipakai. Hentikan proses itu dulu.")
     if args.reset and DATA.exists():
@@ -104,9 +107,16 @@ def main():
     DATA.mkdir(exist_ok=True)
 
     secrets_file = DATA / "secrets.json"
-    if not secrets_file.exists():  # one mail key per data folder, so codes stay valid across restarts
-        secrets_file.write_text(json.dumps({"mailKey": base64.urlsafe_b64encode(os.urandom(32)).decode().rstrip("=")}))
-    mail_key = json.loads(secrets_file.read_text())["mailKey"]
+    secrets = json.loads(secrets_file.read_text()) if secrets_file.exists() else {}
+    # One mail key per data folder, so codes stay valid across restarts; same for the storage keys.
+    secrets.setdefault("mailKey", base64.urlsafe_b64encode(os.urandom(32)).decode().rstrip("="))
+    secrets.setdefault("s3Access", "dev" + uuid.uuid4().hex[:16])
+    secrets.setdefault("s3Secret", uuid.uuid4().hex + uuid.uuid4().hex)
+    secrets_file.write_text(json.dumps(secrets))
+    mail_key = secrets["mailKey"]
+    (DATA / "s3").mkdir(exist_ok=True)
+    (DATA / "s3.json").write_text(json.dumps({"identities": [{"name": "dev", "credentials": [
+        {"accessKey": secrets["s3Access"], "secretKey": secrets["s3Secret"]}], "actions": ["Admin", "Read", "Write", "List"]}]}))
 
     datadir = DATA / "mysql"
     if not datadir.exists():
@@ -120,6 +130,7 @@ def main():
         subprocess.run(["npm.cmd", "ci"], cwd=ROOT / "frontend", check=True)
 
     procs = []
+    started_s3 = False
 
     def start(args, log, env=None):
         output = (DATA / log).open("wb")
@@ -134,14 +145,25 @@ def main():
             query = lambda sql: subprocess.run([mysql, "--no-defaults", "-h127.0.0.1", f"-P{MYSQL_PORT}", "-uroot",
                                                 "-N", "-e", sql], capture_output=True, timeout=10)
             wait(lambda: query("SELECT 1").returncode == 0, "MySQL")
+            subprocess.run(["docker", "rm", "-f", S3_CONTAINER], capture_output=True, timeout=60)
+            subprocess.run(["docker", "run", "-d", "--rm", "--name", S3_CONTAINER, "-p", f"127.0.0.1:{S3_PORT}:8333",
+                            "-v", f"{DATA / 's3'}:/data", "-v", f"{DATA / 's3.json'}:/etc/duit-s3.json:ro", S3_IMAGE,
+                            "server", "-dir=/data", "-s3", "-s3.config=/etc/duit-s3.json"],
+                           check=True, capture_output=True, timeout=120)
+            started_s3 = True
             query(f"CREATE DATABASE IF NOT EXISTS {DB}")
 
             env = dict(os.environ, DATABASE_URL=f"mysql://root@127.0.0.1:{MYSQL_PORT}/{DB}",
                        DUIT_MAIL_KEY=mail_key, DUIT_APP_ORIGIN=f"http://localhost:{WEB_PORT}",
                        DUIT_API_ADDR=f"127.0.0.1:{API_PORT}", DUIT_SMTP_MODE="local", DUIT_SMTP_HOST="127.0.0.1",
                        DUIT_SMTP_PORT=str(smtp.server_address[1]), DUIT_MAIL_FROM="duit@dev.local",
-                       DUIT_DEV_API=f"http://127.0.0.1:{API_PORT}")
+                       DUIT_DEV_API=f"http://127.0.0.1:{API_PORT}", DUIT_S3_ENDPOINT=f"http://127.0.0.1:{S3_PORT}",
+                       DUIT_S3_BUCKET="duit-evidence", DUIT_S3_ACCESS_KEY=secrets["s3Access"],
+                       DUIT_S3_SECRET_KEY=secrets["s3Secret"])
             subprocess.run([ROOT / "target/debug/api.exe", "migrate"], env=env, check=True, timeout=60)
+            # The S3 gateway answers before its filer is ready; retry the bucket setup for a while.
+            wait(lambda: subprocess.run([ROOT / "target/debug/api.exe", "init-storage"], env=env,
+                                        capture_output=True, timeout=30).returncode == 0, "S3", 90)
             start([ROOT / "target/debug/api.exe"], "api.log", env)
             start([ROOT / "target/debug/worker.exe"], "worker.log", env)
             start(["node", ROOT / "frontend/node_modules/vite/bin/vite.js", "--host", "localhost", "--port",
@@ -180,6 +202,8 @@ def main():
                     p.wait(timeout=20)
                 except subprocess.TimeoutExpired:
                     p.kill()
+            if started_s3:
+                subprocess.run(["docker", "stop", "-t", "5", S3_CONTAINER], capture_output=True, timeout=60)
             smtp.shutdown()
 
 

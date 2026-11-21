@@ -4,6 +4,7 @@ import { useRoute } from 'vue-router'
 import { type Op, newOp, send, useFinance } from './finance'
 import { ACTIONS, REASONS } from './messages'
 import { KINDS, formatTime, rupiah } from './money'
+import EvidencePanel from './EvidencePanel.vue'
 import { ApiError, useAuth } from './session'
 
 type Activity = {
@@ -124,6 +125,7 @@ const sign = (kind: string) => (kind === 'DEDUCT' || kind === 'LOAN' ? '−' : '
         <button v-if="!activity.deleted" type="button" class="secondary" :disabled="busy" @click="openDelete">Hapus</button>
         <button v-else type="button" class="secondary" :disabled="busy" @click="restore">Pulihkan</button>
       </div>
+      <EvidencePanel :activity-id="id" :deleted="activity.deleted" @changed="loadRelated" />
       <h2>Audit terkait</h2>
       <p v-if="relatedFailed" class="hint">Audit terkait gagal dimuat.</p>
       <p v-else-if="!related" class="hint">Memuat audit terkait…</p>
@@ -131,7 +133,7 @@ const sign = (kind: string) => (kind === 'DEDUCT' || kind === 'LOAN' ? '−' : '
         <li v-for="item in related" :key="item.id" :data-action="item.action">
           <div>
             <strong>{{ ACTIONS[item.action] ?? item.action }}</strong>
-            <p>{{ formatTime(item.actionAt) }}<template v-if="item.actor !== auth.profile?.id"> · Operator: {{ item.actor }}</template></p>
+            <p>{{ formatTime(item.actionAt) }}<template v-if="item.actor.startsWith('system:')"> · Sistem</template><template v-else-if="item.actor !== auth.profile?.id"> · Operator: {{ item.actor }}</template></p>
           </div>
         </li>
       </ol>

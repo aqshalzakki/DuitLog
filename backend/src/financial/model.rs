@@ -179,6 +179,7 @@ pub enum Code {
     TemporaryFailure,
     OutcomeUnknown,
     SessionOwnerMismatch,
+    EvidenceRejected,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

@@ -84,7 +84,7 @@ async fn sync_items(
     Ok(Json(json!({ "results": results })).into_response())
 }
 
-struct Actor(Principal);
+pub(super) struct Actor(pub(super) Principal);
 
 impl FromRequestParts<AppState> for Actor {
     type Rejection = Error;
@@ -163,6 +163,10 @@ fn rejection(reason: &Rejection, attempt: Option<Uuid>) -> Response {
         Code::SessionOwnerMismatch => (
             StatusCode::CONFLICT,
             "Sesi aktif milik akun lain. Tidak ada yang disinkronkan.",
+        ),
+        Code::EvidenceRejected => (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Bukti ditolak. Gunakan JPG, PNG, WebP, atau PDF yang utuh, maksimal 10 MB.",
         ),
     };
     let mut body = json!({
@@ -256,7 +260,7 @@ impl Command {
     }
 }
 
-fn resource_id(value: &str) -> Result<Uuid, Failure> {
+pub(super) fn resource_id(value: &str) -> Result<Uuid, Failure> {
     Uuid::parse_str(value).map_err(|_| Code::NotFound.into())
 }
 

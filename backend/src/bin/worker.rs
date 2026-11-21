@@ -1,6 +1,6 @@
 use std::process::ExitCode;
 
-use duitlog::{database, mail::Mailer, mail_key, origin};
+use duitlog::{database, evidence, mail::Mailer, mail_key, origin, storage::Storage};
 
 #[tokio::main(worker_threads = 2)]
 async fn main() -> ExitCode {
@@ -13,8 +13,10 @@ async fn main() -> ExitCode {
 
 async fn run() -> Result<(), &'static str> {
     let mail = Mailer::from_env(origin()?, mail_key()?)?;
-    let db = database(1).await?;
-    mail.run(&db).await;
+    let storage = Storage::from_env()?;
+    let db = database(2).await?;
+    // Both loops stop on the same shutdown signal; each handler is idempotent under at-least-once.
+    tokio::join!(mail.run(&db), evidence::run(&db, &storage));
     db.close().await;
     Ok(())
 }

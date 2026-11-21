@@ -25,6 +25,11 @@ export const REASONS: Record<string, string> = {
 }
 
 /** Audit action labels, shared by the Audit page and a transaction's related audit. */
+/** Why the worker refused a stored evidence file (audit `details.reason`). */
+export const EVIDENCE_REASONS: Record<string, string> = {
+  CHANGED: 'isi berkas berubah setelah diunggah', STRUCTURE: 'berkas rusak atau tidak utuh', MISSING: 'berkas tidak ditemukan',
+}
+
 export const ACTIONS: Record<string, string> = {
   ACTIVITY_CREATED: 'Transaksi dicatat', ACTIVITY_EDITED: 'Transaksi diubah', ACTIVITY_DELETED: 'Transaksi dihapus',
   ACTIVITY_RESTORED: 'Transaksi dipulihkan', BALANCE_ADJUSTMENT: 'Penyesuaian saldo', OPENING_BALANCE: 'Saldo awal',
@@ -33,5 +38,7 @@ export const ACTIONS: Record<string, string> = {
   CATEGORY_CREATED: 'Kategori ditambahkan', CATEGORY_RENAMED: 'Kategori diganti nama', CATEGORY_ARCHIVED: 'Kategori diarsipkan',
   CATEGORY_RESTORED: 'Kategori diaktifkan kembali', INTEGRITY_FREEZE: 'Pemeriksaan integritas dimulai',
   INTEGRITY_UNFREEZE: 'Pemeriksaan integritas selesai', TIMEZONE_CHANGED: 'Zona waktu akun diubah',
-  DEFAULT_CATEGORIES_CREATED: 'Kategori default dibuat',
+  DEFAULT_CATEGORIES_CREATED: 'Kategori default dibuat', EVIDENCE_ATTACHED: 'Bukti dilampirkan',
+  EVIDENCE_VERIFIED: 'Bukti lolos pemeriksaan', EVIDENCE_REJECTED: 'Bukti ditolak saat pemeriksaan',
+  EVIDENCE_REMOVED: 'Bukti dilepas',
 }

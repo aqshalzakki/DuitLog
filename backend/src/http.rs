@@ -1,4 +1,5 @@
 use std::net::SocketAddr;
+mod evidence;
 mod finance;
 
 use axum::{
@@ -16,6 +17,7 @@ use serde_json::json;
 use crate::{
     auth::{self, Auth, Cookies, Error, Principal},
     crypto,
+    storage::Storage,
 };
 
 const ACCESS: &str = "__Host-duit-access";
@@ -25,10 +27,15 @@ const REFRESH: &str = "__Host-duit-refresh";
 struct AppState {
     auth: Auth,
     origin: String,
+    storage: Storage,
 }
 
-pub fn router(auth: Auth, origin: String) -> Router {
-    let state = AppState { auth, origin };
+pub fn router(auth: Auth, origin: String, storage: Storage) -> Router {
+    let state = AppState {
+        auth,
+        origin,
+        storage,
+    };
     let api = Router::new()
         .route("/healthz", get(health))
         .route("/readyz", get(ready))
@@ -46,6 +53,7 @@ pub fn router(auth: Auth, origin: String) -> Router {
         .route("/sessions/{id}", delete(revoke_device))
         .route("/account/verified", get(verified))
         .merge(finance::routes())
+        .merge(evidence::routes())
         .fallback(|| async { Error::NotFound })
         .method_not_allowed_fallback(|| async {
             failure(

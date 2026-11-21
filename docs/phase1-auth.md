@@ -25,6 +25,7 @@ API memakai JSON camelCase, error `code`, `message`, `requestId` dan `fieldError
 **Cara cepat untuk mencoba di browser:** `python tests/dev_local.py`. Skrip ini menjalankan:
 - MySQL pribadi di `.dev-local/` pada `127.0.0.1:3307` (data bertahan antar-run; `--reset` mengosongkan);
 - relay SMTP palsu yang mencetak kode verifikasi/reset ke terminal dan `.dev-local/mail.log`;
+- penyimpanan objek S3 lokal (Docker `chrislusf/seaweedfs:4.53`, container `duitlog-dev-s3`, `127.0.0.1:8333`, data di `.dev-local/s3`) untuk bukti transaksi. Docker Desktop harus berjalan;
 - migrasi, API, worker, dan Vite di `http://localhost:5173`.
 
 Ctrl+C menghentikan semuanya. Kalau jendela terminal ditutup paksa, proses anak (mysqld, api, worker, node) bisa tertinggal dan memegang port 3307/3000/5173; hentikan proses itu dulu sebelum menjalankan ulang. `--smoke` adalah cek mandiri: mendaftarkan satu akun, menunggu kodenya, lalu berhenti. Hanya untuk pengembangan: root MySQL di folder ini tanpa kata sandi.
@@ -38,6 +39,7 @@ Siapkan MySQL khusus pengembangan dan relay SMTP uji lokal. Masukkan nilai konfi
 | `DUIT_API_ADDR` | Default `127.0.0.1:3000`. Vite memakai proxy ke alamat ini. |
 | `DUIT_MAIL_KEY` | 32 byte acak dalam Base64url tanpa padding. Pakai nilai yang sama untuk API dan worker. Simpan melalui konfigurasi lokal yang terlindungi. |
 | `DUIT_MAIL_FROM` | Alamat pengirim untuk worker. |
+| `DUIT_S3_ENDPOINT`, `DUIT_S3_BUCKET`, `DUIT_S3_REGION`, `DUIT_S3_ACCESS_KEY`, `DUIT_S3_SECRET_KEY` | Penyimpanan bukti privat (Fase 6). HTTP polos hanya untuk loopback. `api init-storage` membuat bucket. Lihat `phase6-evidence.md`. |
 | `DUIT_SMTP_MODE`, `DUIT_SMTP_HOST`, `DUIT_SMTP_PORT` | Mode `local` memakai `127.0.0.1:1025`. Untuk relay nyata, worker meminta STARTTLS serta `DUIT_SMTP_USERNAME` dan `DUIT_SMTP_PASSWORD`. |
 
 ```powershell
