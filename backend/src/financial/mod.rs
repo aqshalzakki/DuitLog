@@ -1,5 +1,6 @@
 pub mod model;
 pub(crate) mod store;
+pub mod sync;
 mod write;
 
 #[cfg(test)]
@@ -432,6 +433,21 @@ pub(crate) async fn view_state(db: &MySqlPool, owner: &str) -> Result<Value, Fai
         "financialStateVersion": state.version, "opening": state.opening,
         "frozen": state.frozen, "recoveryActive": active, "updatedAt": state.updated_at.map(Moment),
     }))
+}
+
+/// Whole-sync gate. Each item still rechecks both holds under the account lock in `execute`.
+pub(crate) async fn sync_allowed(db: &MySqlPool, owner: &str) -> Result<(), Failure> {
+    let mut conn = db.acquire().await?;
+    let active: bool = sqlx::query_scalar("SELECT active FROM financial_recovery WHERE id=1")
+        .fetch_one(&mut *conn)
+        .await?;
+    if active {
+        return Err(Code::FinancialRecoveryActive.into());
+    }
+    if store::read_account(&mut conn, owner).await?.frozen {
+        return Err(Code::FinancialIntegrityFrozen.into());
+    }
+    Ok(())
 }
 
 pub(crate) async fn lookup(db: &MySqlPool, owner: &str, id: Uuid) -> Result<Outcome, Failure> {

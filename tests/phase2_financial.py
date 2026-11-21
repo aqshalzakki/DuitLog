@@ -174,6 +174,8 @@ def financial_test(database, env, mail, port, origin):
     check(alice.request("GET", "/integrity-status", 200)["frozen"], False)
     from phase2_stress import stress_test
     stress_test(database, mail, port, origin, bob, run_operator)
+    from phase3_sync import sync_test
+    sync_test(database, alice, bob, run_operator)
     use_db(database, "UPDATE financial_recovery SET active=TRUE WHERE id=1;")
     operation(alice, "/activities", input_a, status=503, code="FINANCIAL_RECOVERY_ACTIVE")
     operation(bob, "/activities", input_a, status=503, code="FINANCIAL_RECOVERY_ACTIVE")

@@ -1,6 +1,6 @@
 use axum::{
     Json, Router,
-    extract::{FromRequestParts, Path, Query, State},
+    extract::{DefaultBodyLimit, FromRequestParts, Path, Query, State},
     http::{StatusCode, request::Parts},
     response::{IntoResponse, Response},
     routing::{get, post},
@@ -13,7 +13,7 @@ use super::{AppState, Input, failure};
 use crate::{
     auth::{Error, Principal},
     crypto,
-    financial::{self, Failure, Mutation, Outcome, model::*, store},
+    financial::{self, Failure, Mutation, Outcome, model::*, store, sync},
 };
 
 pub(super) fn routes() -> Router<AppState> {
@@ -35,6 +35,46 @@ pub(super) fn routes() -> Router<AppState> {
         .route("/categories/{id}/{action}", post(category_action))
         .route("/audit", get(audit))
         .route("/operations/{id}", get(lookup))
+        .route(
+            "/sync/items",
+            post(sync_items).layer(DefaultBodyLimit::max(64 * 1024)),
+        )
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Batch {
+    items: Vec<Map<String, Value>>,
+}
+
+async fn sync_items(
+    State(state): State<AppState>,
+    actor: Actor,
+    Input(batch): Input<Batch>,
+) -> Result<Response, Failure> {
+    if batch.items.is_empty() || batch.items.len() > sync::MAX_ITEMS {
+        return Err(Code::ValidationError.into());
+    }
+    let items: Vec<sync::Item> = batch
+        .items
+        .into_iter()
+        .map(sync::Item::parse)
+        .collect::<Option<_>>()
+        .ok_or(Code::ValidationError)?;
+    let mut seen = std::collections::HashSet::new();
+    if !items
+        .iter()
+        .all(|item| seen.insert(item.client) && seen.insert(item.attempt))
+    {
+        return Err(Code::ValidationError.into());
+    }
+    let owner = actor.0.owner_id;
+    financial::sync_allowed(&state.auth.db, &owner).await?;
+    // Spawned so a dropped client connection cannot cancel the batch between items.
+    let results = tokio::spawn(sync::run(state.auth.db.clone(), owner, items))
+        .await
+        .map_err(|_| Failure::Internal)?;
+    Ok(Json(json!({ "results": results })).into_response())
 }
 
 struct Actor(Principal);
