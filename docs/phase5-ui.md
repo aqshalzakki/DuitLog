@@ -1,8 +1,9 @@
-# Fase 5 · Product UX (slice 1–3)
+# Fase 5 · Product UX (slice 1–4)
 
 Slice ini mencakup SCR-05, SCR-06, SCR-09 (sebagian), SCR-10, SCR-11, SCR-19 dan SCR-21 (koreksi konflik). Rujukan: PR-BAL-01, PR-DASH-01/05/06/07/08, PR-TXN-01–08 (tanpa lampiran), PR-REC-01/03/04/09, PR-OFF-03–05, dan §6.4. **Fase 5 dan gate G4 belum selesai.**
 
 Slice 2 menambah Riwayat, detail, edit/hapus/restore, Baru dihapus, Kategori, dan Piutang (daftar peminjam).
+Slice 4 menambah Laporan (SCR-20) dan statistik periode di Beranda (sebagian SCR-09). Rujukan: BR-RPT-01–08, BR-RPT-11, PR-DASH-02/03, PR-RPT-01–06, AC-20.
 Slice 3 menambah Penyesuaian Saldo (SCR-16), Detail Peminjam (SCR-18), dan Audit (SCR-24). Rujukan: PR-BAL-02–04, PR-BAL-06, PR-REC-06/07, PR-HIS-08.
 
 Belum termasuk:
@@ -10,7 +11,10 @@ Belum termasuk:
 - Ubah profil peminjam (endpoint sudah ada)
 - "Audit terkait" di Detail transaksi. Server belum bisa memfilter audit per resource.
 - Kategori default. Backend tidak menyemai kategori, padahal PRD memintanya.
-- Statistik periode, grafik, dan Reports
+- Ekspor PDF/Excel dan status job (Fase 6, worker)
+- Daftar detail transaksi di halaman Laporan. Ringkasan, seri, dan tabel per kategori/peminjam sudah ada; daftar per transaksi menyusul bersama ekspor.
+- Grafik di Beranda. Beranda hanya menampilkan ringkasan periode dengan tautan ke Laporan, tempat grafik berada.
+- Perbandingan periode untuk Pergerakan Saldo dan Piutang. Yang ada baru perbandingan pemasukan, pengeluaran, dan selisih bersih.
 - Draft persisten, lampiran, Settings (zona waktu, tema), dan Audit History
 - Bottom navigation mobile lima slot dan peringatan logout bila ada pending
 - Login dan verifikasi masih mendarat di `/account`. Beranda ada di `/`.
@@ -39,6 +43,26 @@ Belum termasuk:
 | Penyesuaian (`/adjust`) | Hanya online, dibuka dari Beranda dan bukan dari Quick Add. Isinya target saldo (boleh Rp0 atau negatif), lalu ringkasan: saldo yang ditinjau, target, selisih, dan "waktu server saat disimpan". Tidak ada yang diterapkan sebelum "Simpan penyesuaian". Attempt dipakai ulang bila hasilnya belum diketahui. Gagal → target tidak ditampilkan seolah sudah diterapkan. |
 | Detail peminjam (`/borrowers/:id`) | Sisa piutang, Lunas/Belum lunas, kontak, dan riwayat pinjaman/pembayaran lewat `GET /activities?borrowerId=` dengan "Muat lagi". "Catat pinjaman" dan "Terima pembayaran" membuka form dengan peminjam sudah dipilih, hanya bila form itu belum diisi. Arsip hanya saat lunas; aktifkan kembali. Hanya online. |
 | Audit (`/audit`) | Urut menurut waktu aksi server. Label aksi, waktu WIB, aktor operator bila bukan pemilik, alasan, field yang berubah (sebelum → sesudah), saldo dan piutang sebelum → sesudah, perubahan selisih setiap titik saldo dengan "target tetap", reaktivasi peminjam otomatis, dan tautan ke transaksi. Kategori/peminjam yang berubah ditampilkan sebagai id. Hanya online. |
+
+## Laporan (slice 4)
+
+`GET /reports/{income-expense|balance-movement|receivables}?period=day|week|month|year&date=YYYY-MM-DD`, atau `period=custom&from=…&to=…`. Endpoint ini hanya online, memakai data terkonfirmasi, dan dibatasi owner.
+
+| Bagian | Implementasi |
+| --- | --- |
+| Konsistensi | Ledger, kategori, dan peminjam dibaca dalam satu transaksi InnoDB REPEATABLE READ (default; pool tidak mengubahnya). Tidak mengambil lock akun. |
+| Sumber angka | Saldo dan piutang pembuka/penutup memakai `model::replay` pada prefiks ledger, dan delta snapshot diambil dari replay penuh. Pergerakan dalam rentang memakai `Activity::signed_amount`/`moves_cash`, helper yang juga dipakai `replay`, jadi aturan kasnya tidak diduplikasi. Server memeriksa pembuka + komponen = penutup dan per peminjam awal + pinjaman − pembayaran = akhir; selisih berarti defect (500). |
+| Pemasukan/pengeluaran | Hanya Increase/Deduct yang tidak terhapus. Pinjaman, pembayaran, snapshot, dan pending tidak dihitung. Kategori null = "Tanpa kategori"; kategori arsip tetap muncul. |
+| Periode | Batas dihitung di server dengan zona Asia/Jakarta. Minggu mulai Senin. Periode berjalan dipotong di "sekarang" dan dibandingkan dengan waktu berlalu yang sama sejak awal periode sebelumnya, dipotong di akhirnya (31 Maret ↔ Februari penuh). Periode selesai dibandingkan dengan periode penuh sebelumnya. Custom dibandingkan dengan rentang sama panjang tepat sebelumnya. Periode di masa depan, custom terbalik, atau lebih dari 5 tahun → 422. |
+| Perbandingan | Integer saja, persepuluhan persen dibulatkan menjauhi nol, terhadap \|sebelumnya\|. Keduanya 0 → `ZERO` ("0%"). Sebelumnya 0 dan sekarang positif → `NEW` ("Baru"). Sebelumnya 0 dan sekarang negatif → `NO_BASELINE`, dijelaskan di UI. |
+| Seri | Harian sampai 92 hari, bulanan untuk tahunan atau rentang lebih panjang. Pergerakan saldo memberi saldo akhir per bucket. |
+| Freeze/recovery | Laporan ditolak dengan kode yang sama dengan mutasi (423/503). Angka dari ledger yang belum diverifikasi tidak ditampilkan seolah resmi. |
+| UI `/reports` | Hanya online (`session` + `verified`) dan tidak pernah disimpan ke cache vault. Tiga tab, pilihan periode dan tanggal atau rentang, serta label rentang dan pembanding. Grafik berupa tabel dengan bar CSS: pemasukan polos, pengeluaran/negatif bergaris, jadi warna bukan satu-satunya pembeda, dan angka selalu tertulis. Gagal tanpa jawaban server → "Laporan hanya tersedia saat online", tanpa angka. |
+| Beranda | Statistik periode (harian sampai tahunan) dari endpoint yang sama, hanya online. Saldo terkonfirmasi dan piutang di atasnya tidak bergantung pada periode. |
+
+**Usulan, dapat direview:** zona waktu tetap Asia/Jakarta di server (`report::ZONE`) sampai ada pengaturan akun; minggu mulai Senin; batas custom 5 tahun; laporan ditolak saat freeze/recovery; cara baca persen terhadap baseline negatif.
+
+`shortcut:` setiap laporan memuat dan me-replay seluruh ledger owner. Perlu total tersimpan atau replay ber-checkpoint bila ledger mencapai puluhan ribu baris.
 
 Backend slice 3:
 - `GET /activities` menerima `borrowerId` (UUID, dibatasi owner, bisa digabung dengan `before` dan `deleted`).
@@ -78,6 +102,22 @@ Backend slice 3:
 | Penyesuaian | Saldo awal Rp100.000. "abc" ditolak. Target 250.000 → ringkasan Rp250.000 dan selisih Rp150.000. Server belum berubah sebelum konfirmasi; sesudahnya saldo Rp250.000, snapshot ADJUSTMENT dengan delta 150.000. |
 | Mundur tanggal | Pemasukan Rp5.000 di antara saldo awal dan penyesuaian → saldo tetap Rp250.000. Audit menampilkan "Rp150.000 → Rp145.000 (target tetap)" dan saldo Rp250.000 → Rp250.000. Detail penyesuaian: target dan selisih Rp145.000, tanpa Hapus. |
 | Detail peminjam | Nama di Piutang → detail. "Catat pinjaman" → form dengan peminjam terpilih → simpan. Detail: sisa Rp20.000, satu baris riwayat (aktivitas lain tidak ikut), tanpa Arsipkan. |
+
+Verifikasi slice 4:
+- `cargo test`: 7 uji murni `report.rs` untuk perbandingan bulan berjalan, potongan 31 Maret, periode selesai, minggu, custom (termasuk hari ini), rentang tidak valid, batas hari WIB, dan pembulatan perbandingan.
+- `phase2_financial.py` di MySQL, dengan tanggal historis tetap:
+  - 16:59:59.999999Z dan 17:00Z jatuh di hari WIB berbeda;
+  - pinjaman, pembayaran, pinjaman tanpa pengaruh saldo, dan pemasukan terhapus tidak masuk pemasukan;
+  - kategori, seri bulan, pergerakan saldo, dan piutang per peminjam;
+  - akun lain tidak bocor, dan 422 untuk lima query salah;
+  - freeze → 423.
+- Rekonsiliasi: penutup tahun berjalan = `/financial-state` dan piutang per peminjam = `outstanding`, untuk alice, bob, dan carol (setelah histori acak dan penulis konkuren).
+- `tests/phase5_reports.py` lewat UI:
+  - statistik Beranda berubah ikut periode, saldo tidak;
+  - laporan harian dengan "turun 50,0%", "Baru", dan "turun 80,0%";
+  - kategori, pergerakan saldo Rp1.000 → Rp1.050, piutang Tono 0/270/50/220, dan bulan 31 baris;
+  - offline → pesan online-only tanpa angka (AC-20).
+- Suite penuh 2/2 lulus.
 
 Suite penuh (`--financial --browser --offline`) dijalankan 5 kali: 4 lulus. 1 gagal di langkah logout suite vault Fase 4 (halaman `/account` kosong), bukan di slice ini. Penyebabnya belum ditemukan. Diagnosa susulan: tiga run penuh lagi dengan log jaringan dan browser semuanya lulus, jadi kegagalannya tidak terulang. `see()` sekarang mencatat error jaringan/log, `readyState`, dan isi `#app`, sehingga kegagalan berikutnya memuat penyebabnya. Kegagalan lain dalam run verifikasi slice 2 ternyata bug sungguhan:
 - Engine: `cycle(true)` dari simpan atau koreksi dibuang diam-diam bila tab yang sama sedang di tengah siklus, sehingga item baru menunggu tick 30 detik. Sekarang ditandai dan dijalankan tepat setelah siklus itu. Ada kasus baru di `phase4_sync_client.py` yang gagal tanpa perbaikan ini dan lulus dengannya.

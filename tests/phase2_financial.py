@@ -36,6 +36,18 @@ def activity(kind, amount, effective_at, **fields):
     return {"kind": kind, "amount": str(amount), "effectiveAt": effective_at, **fields}
 
 
+def reconcile(client):
+    """Reports agree with the Financial Core: a running year closes at the materialized balance, and
+    each borrower closes at its stored outstanding."""
+    state = client.request("GET", "/financial-state", 200)
+    year = client.request("GET", "/reports/balance-movement?period=year", 200)
+    check((year["range"]["running"], year["closing"]), (True, state["balance"]))
+    owed = client.request("GET", "/reports/receivables?period=year", 200)
+    check(owed["closing"], state["receivables"])
+    for row in owed["borrowers"]:
+        check(row["closing"], client.request("GET", "/borrowers/" + row["borrowerId"], 200)["outstanding"])
+
+
 def use_db(database, sql):
     database.query(f"USE {DB}; {sql}")
 
@@ -167,8 +179,11 @@ def financial_test(database, env, mail, port, origin):
     accepted = alice.request("POST", "/activities", 200, data=blocked)
     check(accepted["financialSequence"], seq[1] + 1)
 
+    reconcile(alice)
     use_db(database, f"UPDATE financial_accounts SET balance=balance+1 WHERE owner_id='{aid}';")
     operation(alice, "/activities", input_a, status=423, code="FINANCIAL_INTEGRITY_FROZEN")
+    # An unverified ledger gives no official report.
+    check(alice.request("GET", "/reports/balance-movement?period=month", 423)["code"], "FINANCIAL_INTEGRITY_FROZEN")
     check(alice.request("GET", "/integrity-status", 200), {"frozen": True, "recoveryActive": False})
     check(operation(bob, "/activities", input_a)["balance"], "-14")
     operator = ROOT / "target/debug/finance_operator.exe"
@@ -181,6 +196,7 @@ def financial_test(database, env, mail, port, origin):
     use_db(database, f"UPDATE financial_accounts SET balance=balance-1 WHERE owner_id='{aid}';")
     check(run_operator("unfreeze"), "frozen=false")
     check(alice.request("GET", "/integrity-status", 200)["frozen"], False)
+    report_test(alice, bob)
     from phase2_stress import stress_test
     stress_test(database, mail, port, origin, bob, run_operator)
     from phase3_sync import sync_test
@@ -194,3 +210,59 @@ def financial_test(database, env, mail, port, origin):
     print("Financial Core MySQL: snapshots, history, receivable prefixes, categories, owner scope, "
           "parallel writes, idempotency, audit rollback and recovery/integrity guards OK", flush=True)
     use_db(database, "UPDATE financial_recovery SET active=FALSE WHERE id=1;")  # later suites share this database
+
+
+def report_test(alice, bob):
+    """Reports on fixed historical days: WIB day boundary, the three families, comparison and isolation."""
+    food = operation(bob, "/categories", {"name": "Makan"})["resourceId"]
+    tono = operation(bob, "/borrowers", {"name": "Tono"})["resourceId"]
+    for kind, amount, at, extra in [
+        ("INCREASE", 1000, "2021-03-10T16:59:59.999999Z", {}),  # 23:59:59 WIB, still 10 March
+        ("INCREASE", 500, "2021-03-10T17:00:00Z", {}),  # 00:00 WIB, 11 March
+        ("DEDUCT", 300, "2021-03-11T05:00:00Z", {"categoryId": food}),
+        ("LOAN", 200, "2021-03-11T06:00:00Z", {"borrowerId": tono}),
+        ("REPAYMENT", 50, "2021-03-11T07:00:00Z", {"borrowerId": tono}),
+        ("LOAN", 70, "2021-03-11T08:00:00Z", {"borrowerId": tono, "affectCashBalance": False}),
+    ]:
+        operation(bob, "/activities", activity(kind, amount, at, **extra))
+    gone = operation(bob, "/activities", activity("INCREASE", 999, "2021-03-11T09:00:00Z"))
+    operation(bob, "/activities/" + gone["resourceId"], {"expectedVersion": 1}, "DELETE")
+
+    day = bob.request("GET", "/reports/income-expense?period=day&date=2021-03-11", 200)
+    check(day["range"], {"from": "2021-03-11", "to": "2021-03-11", "start": "2021-03-10T17:00:00Z",
+                         "end": "2021-03-11T17:00:00Z", "period": "day", "running": False})
+    check((day["timezone"], day["comparison"]["from"], day["comparison"]["to"]), ("Asia/Jakarta", "2021-03-10", "2021-03-10"))
+    # Loans, repayments, the off-ledger loan and the deleted income are not income or expense.
+    check(day["current"], {"income": "500", "expense": "300", "net": "200"})
+    check(day["previous"], {"income": "1000", "expense": "0", "net": "1000"})
+    check(day["change"], {"income": {"state": "PERCENT", "percent": "-50.0"}, "expense": {"state": "NEW"},
+                          "net": {"state": "PERCENT", "percent": "-80.0"}})
+    check([(c["categoryId"], c["name"], c["income"], c["expense"]) for c in day["categories"]],
+          [(None, None, "500", "0"), (food, "Makan", "0", "300")])
+    month = bob.request("GET", "/reports/income-expense?period=month&date=2021-03-01", 200)
+    check((len(month["series"]), month["series"][9], month["series"][10]),
+          (31, {"label": "2021-03-10", "income": "1000", "expense": "0"}, {"label": "2021-03-11", "income": "500", "expense": "300"}))
+    check(month["comparison"]["from"], "2021-02-01")
+
+    move = bob.request("GET", "/reports/balance-movement?period=day&date=2021-03-11", 200)
+    before = int(move["opening"])
+    check({k: move[k] for k in ("income", "expense", "loansOut", "repaymentsIn", "snapshotDelta")},
+          {"income": "500", "expense": "300", "loansOut": "200", "repaymentsIn": "50", "snapshotDelta": "0"})
+    check((move["closing"], move["series"]), (str(before + 50), [{"label": "2021-03-11", "closing": str(before + 50)}]))
+    check(bob.request("GET", "/reports/balance-movement?period=day&date=2021-03-10", 200)["closing"], move["opening"])
+
+    owed = bob.request("GET", "/reports/receivables?period=day&date=2021-03-11", 200)
+    check(owed["borrowers"], [{"borrowerId": tono, "name": "Tono", "archived": False, "opening": "0",
+                               "loans": "270", "repayments": "50", "closing": "220"}])
+    check(alice.request("GET", "/reports/income-expense?period=day&date=2021-03-11", 200)["current"],
+          {"income": "0", "expense": "0", "net": "0"})  # nothing of bob's leaks into alice's report
+    check(tono in [b["borrowerId"] for b in alice.request("GET", "/reports/receivables?period=day&date=2021-03-11", 200)["borrowers"]], False)
+    for bad in ("income-expense?period=custom&from=2021-03-01", "income-expense?period=week&date=2099-01-01",
+                "income-expense?period=hour", "income-expense?period=custom&from=2021-03-02&to=2021-03-01",
+                "receivables?period=day&date=2021-3-1"):
+        check(bob.request("GET", "/reports/" + bad, 422)["code"], "VALIDATION_ERROR")
+    bob.request("GET", "/reports/unknown?period=day", 404)
+    reconcile(alice)
+    reconcile(bob)
+    print("Reports: WIB day boundary, income/expense excludes receivables and deleted, balance movement and "
+          "receivables reconcile with the core, comparison states, owner isolation, freeze refuses", flush=True)

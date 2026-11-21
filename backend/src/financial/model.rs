@@ -210,6 +210,28 @@ impl Rejection {
     }
 }
 
+impl Activity {
+    /// Cash direction of a non-snapshot activity, before the affectCashBalance toggle.
+    /// Shared by `replay` and the reports so both read the ledger the same way.
+    pub fn signed_amount(&self) -> Result<i64, Rejection> {
+        let amount = self
+            .amount
+            .filter(|value| value.0 > 0)
+            .ok_or(Code::InvalidAmount)?
+            .0;
+        Ok(match self.kind {
+            Kind::Increase | Kind::Repayment => amount,
+            Kind::Deduct | Kind::Loan => -amount,
+            _ => return Err(Code::ValidationError.into()),
+        })
+    }
+
+    /// A loan or repayment with the toggle off changes only the receivable.
+    pub fn moves_cash(&self) -> bool {
+        self.affect_cash_balance != Some(false)
+    }
+}
+
 pub fn replay(rows: &mut [Activity]) -> Result<Projection, Rejection> {
     rows.sort_unstable_by_key(|row| (row.effective_at, row.sequence));
     let mut projection = Projection::default();
@@ -234,16 +256,7 @@ pub fn replay(rows: &mut [Activity]) -> Result<Projection, Rejection> {
             projection.balance = target;
             continue;
         }
-        let amount = activity
-            .amount
-            .filter(|value| value.0 > 0)
-            .ok_or(Code::InvalidAmount)?
-            .0;
-        let cash = match activity.kind {
-            Kind::Increase | Kind::Repayment => amount,
-            Kind::Deduct | Kind::Loan => -amount,
-            _ => return Err(Code::ValidationError.into()),
-        };
+        let cash = activity.signed_amount()?;
         if activity.kind.receivable() {
             let borrower = activity.borrower_id.as_ref().ok_or(Code::ValidationError)?;
             let outstanding = projection.receivables.entry(borrower.clone()).or_default();
@@ -257,7 +270,7 @@ pub fn replay(rows: &mut [Activity]) -> Result<Projection, Rejection> {
                 });
             }
         }
-        if activity.affect_cash_balance != Some(false) {
+        if activity.moves_cash() {
             projection.balance = projection
                 .balance
                 .checked_add(cash)

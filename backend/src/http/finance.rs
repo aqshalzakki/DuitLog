@@ -34,6 +34,7 @@ pub(super) fn routes() -> Router<AppState> {
         .route("/categories/{id}", axum::routing::patch(edit_category))
         .route("/categories/{id}/{action}", post(category_action))
         .route("/audit", get(audit))
+        .route("/reports/{family}", get(report))
         .route("/operations/{id}", get(lookup))
         .route(
             "/sync/items",
@@ -566,6 +567,46 @@ async fn lookup(
 #[derive(Deserialize)]
 struct AuditQuery {
     before: Option<u64>,
+}
+
+#[derive(Deserialize)]
+struct ReportQuery {
+    period: String,
+    date: Option<String>,
+    from: Option<String>,
+    to: Option<String>,
+}
+
+async fn report(
+    State(state): State<AppState>,
+    actor: Actor,
+    Path(family): Path<String>,
+    query: Result<Query<ReportQuery>, QueryRejection>,
+) -> Result<Json<Value>, Failure> {
+    let Query(query) = query.map_err(|_| Failure::from(Code::ValidationError))?;
+    let invalid = || Failure::from(Code::ValidationError);
+    let period = financial::report::Period::parse(&query.period).ok_or_else(invalid)?;
+    let date = |value: Option<&String>| {
+        value
+            .map(|v| financial::report::parse_date(v).ok_or_else(invalid))
+            .transpose()
+    };
+    let (from, to) = if period == financial::report::Period::Custom {
+        (
+            date(query.from.as_ref())?.ok_or_else(invalid)?,
+            date(query.to.as_ref())?,
+        )
+    } else {
+        let today = time::OffsetDateTime::now_utc()
+            .to_offset(
+                time::UtcOffset::from_whole_seconds(7 * 3600).map_err(|_| Failure::Internal)?,
+            )
+            .date();
+        (date(query.date.as_ref())?.unwrap_or(today), None)
+    };
+    Ok(Json(
+        financial::report(&state.auth.db, &actor.0.owner_id, &family, period, from, to).await?,
+    ))
 }
 
 async fn audit(

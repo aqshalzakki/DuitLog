@@ -8,7 +8,7 @@ import random
 import time
 
 from phase1_auth import DB, Client, check, wait_for
-from phase2_financial import activity, request_body, signed_in
+from phase2_financial import activity, reconcile, request_body, signed_in
 
 EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
 SEED = int(os.environ.get("DUIT_FIN_SEED", "20261121"))
@@ -236,4 +236,5 @@ def stress_test(database, mail, port, origin, bob, run_operator):
     print(f"Concurrent writers OK: 40 parallel deducts, 6x same attempt, 6 racing repayments "
           f"({retries} retryable 503s retried with the same attemptId)", flush=True)
     held_lock(database, carol, bob, cid)
+    reconcile(carol)  # after randomized history and concurrent writers
     print("Held account lock: 503 TEMPORARY_FAILURE, no partial write, other user unaffected, same attempt applies once", flush=True)

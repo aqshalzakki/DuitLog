@@ -50,6 +50,7 @@ async function strongUnlock() {
         <RouterLink to="/history">Riwayat</RouterLink>
         <RouterLink to="/borrowers">Piutang</RouterLink>
         <RouterLink to="/categories">Kategori</RouterLink>
+        <RouterLink v-if="auth.profile?.emailVerified" to="/reports">Laporan</RouterLink>
         <RouterLink to="/sync">Sinkronisasi</RouterLink>
         <RouterLink to="/offline">Offline</RouterLink>
       </template>

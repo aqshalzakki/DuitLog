@@ -1,4 +1,5 @@
 pub mod model;
+pub mod report;
 pub(crate) mod store;
 pub mod sync;
 mod write;
@@ -448,6 +449,35 @@ pub(crate) async fn sync_allowed(db: &MySqlPool, owner: &str) -> Result<(), Fail
         return Err(Code::FinancialIntegrityFrozen.into());
     }
     Ok(())
+}
+
+/// One report family over one consistent read. Refused while the account is frozen or recovery is
+/// active, because a figure from an unverified ledger must not look official.
+pub(crate) async fn report(
+    db: &MySqlPool,
+    owner: &str,
+    family: &str,
+    period: report::Period,
+    from: time::Date,
+    to: Option<time::Date>,
+) -> Result<Value, Failure> {
+    sync_allowed(db, owner).await?;
+    let ranges = report::ranges(period, from, to, Moment::now().0)?;
+    // InnoDB REPEATABLE READ: ledger, categories and borrowers come from the same snapshot.
+    let mut tx = db.begin().await?;
+    let rows = store::ledger(&mut tx, owner).await?;
+    let categories = store::categories(&mut tx, owner).await?;
+    let borrowers = store::borrowers(&mut tx, owner).await?;
+    tx.rollback().await?;
+    // shortcut: loads and replays the owner's whole ledger per request; add stored period totals
+    // or a checkpointed replay once a ledger reaches tens of thousands of rows.
+    let ledger = report::Ledger::new(rows)?;
+    match family {
+        "income-expense" => report::income_expense(&ledger, &ranges, &categories),
+        "balance-movement" => report::balance_movement(&ledger, &ranges),
+        "receivables" => report::receivables(&ledger, &ranges, &borrowers),
+        _ => Err(Code::NotFound.into()),
+    }
 }
 
 pub(crate) async fn lookup(db: &MySqlPool, owner: &str, id: Uuid) -> Result<Outcome, Failure> {

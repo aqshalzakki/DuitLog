@@ -16,6 +16,7 @@ import CategoriesPage from './CategoriesPage.vue'
 import AdjustmentPage from './AdjustmentPage.vue'
 import BorrowerPage from './BorrowerPage.vue'
 import AuditPage from './AuditPage.vue'
+import ReportsPage from './ReportsPage.vue'
 import { useEntries, useFinance } from './finance'
 import { useSync } from './sync/engine'
 import { useAuth } from './session'
@@ -34,6 +35,7 @@ const router = createRouter({
     { path: '/borrowers', name: 'borrowers', component: BorrowersPage, meta: { offline: true } },
     { path: '/borrowers/:id', name: 'borrower', component: BorrowerPage, meta: { session: true, verified: true } },
     { path: '/adjust', name: 'adjust', component: AdjustmentPage, meta: { session: true, verified: true } },
+    { path: '/reports', name: 'reports', component: ReportsPage, meta: { session: true, verified: true } },
     { path: '/audit', name: 'audit', component: AuditPage, meta: { session: true, verified: true } },
     { path: '/categories', name: 'categories', component: CategoriesPage, meta: { offline: true } },
     { path: '/login', name: 'login', component: AuthPage },
