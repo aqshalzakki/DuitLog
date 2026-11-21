@@ -284,7 +284,7 @@ def verify_api(database, env, smtp_server, client, work):
         yield
 
 
-def main(browser, finance=False):
+def main(browser, finance=False, offline=False):
     with tempfile.TemporaryDirectory(prefix="duit-phase1-", dir=ROOT) as workdir:
         work = Path(workdir)
         mysql_probe.WORK = work
@@ -327,11 +327,15 @@ def main(browser, finance=False):
                     if browser:
                         from phase1_browser import browser_test
                         browser_test(browser, env, origin, api_port, work, mail)
+                    if browser and offline:
+                        from phase4_offline import offline_test
+                        offline_test(browser, env, origin, api_port, work, mail)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--browser", type=Path, help="Optional path to Chrome for browser E2E")
     parser.add_argument("--financial", action="store_true", help="Also run Financial Core regression")
+    parser.add_argument("--offline", action="store_true", help="With --browser, also run the offline vault suite")
     args = parser.parse_args()
-    main(args.browser, args.financial)
+    main(args.browser, args.financial, args.offline)

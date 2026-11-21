@@ -98,6 +98,8 @@ def run_chrome(browser, env, origin, work, mail):
             see("location.pathname === '/account' && document.querySelector('main')?.textContent.includes('Browser test')")
             check(js("document.cookie.includes('duit-access') || document.cookie.includes('duit-refresh')"), False)
             check(js("localStorage.length + sessionStorage.length"), 0)
+            # Page.reload returns before navigation; wait for the new document's button before clicking.
+            see("Array.from(document.querySelectorAll('button')).some(button => button.textContent.trim() === 'Keluar')")
             js("Array.from(document.querySelectorAll('button')).find(button => button.textContent.trim() === 'Keluar').click()")
             see("location.pathname === '/login'")
             print("Chrome mobile viewport, keyboard skip link, register/login/verify/reload/logout OK", flush=True)
