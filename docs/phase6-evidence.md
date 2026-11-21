@@ -2,7 +2,7 @@
 
 Cakupan: BR-FILE-01..06, PR-FILE-01..06, AC-21. Satu bukti opsional per aktivitas yang sudah dikonfirmasi server: JPG, PNG, WebP, atau PDF, paling besar 10 MB. Bukti disimpan privat di penyimpanan objek S3-compatible dan terpisah dari commit finansial.
 
-Belum termasuk: bukti offline terenkripsi, ekspor PDF/Excel, pembersihan objek yatim, dan pemindaian malware.
+Dokumen ini juga mencakup pembersihan objek sementara pada Fase 6 slice 2. Bukti offline terenkripsi, ekspor PDF/Excel, dan pemindaian malware berada di luar kedua slice ini.
 
 ## Alur
 
@@ -19,7 +19,8 @@ Belum termasuk: bukti offline terenkripsi, ekspor PDF/Excel, pembersihan objek y
    - struktur dasar berkas (rantai chunk PNG, penutup JPEG, ukuran RIFF WebP, `%%EOF` pada PDF).
 
    Berkas yang ditolak mendapat 422 `EVIDENCE_REJECTED` dengan `conflictDetails.reason` berisi `EMPTY`, `TOO_LARGE`, `TYPE`, `NAME`, atau `STRUCTURE`.
-4. Objek ditulis ke S3 lebih dulu. Setelah itu satu transaksi MySQL pendek berjalan:
+4. Server mencatat reservasi objek di MySQL, lalu menulis objek ke S3. Setelah itu satu transaksi MySQL pendek berjalan:
+   - mengambil reservasi sebelum worker mengklaimnya;
    - mengunci baris aktivitas;
    - menandai bukti lama sebagai `REMOVED`;
    - menyisipkan baris `QUARANTINED`;
@@ -33,12 +34,19 @@ Belum termasuk: bukti offline terenkripsi, ekspor PDF/Excel, pembersihan objek y
 ## Aturan dan penolakan
 
 - **Kepemilikan:** setiap query dibatasi per pemilik. Aktivitas milik orang lain mendapat 404.
-- **Kunci objek:** `ev/` + SHA-256 dari `owner:uploadId`.
+- **Kunci objek:** setiap permintaan unggah baru memakai kunci acak `ev/v2/{uuid}`. Percobaan paralel dengan `uploadId` yang sama tidak saling menimpa. Referensi bukti yang tercatat sebelum migrasi tetap dapat dibaca.
 - **Satu bukti aktif per aktivitas:** dijaga oleh kolom generated `active_activity` dengan constraint UNIQUE.
 - **Aktivitas terhapus:** unggah dan hapus bukti mendapat 409 `INVALID_ACTIVITY_STATE`. Bukti yang sudah ada tetap bisa dibaca.
 - **Freeze atau Financial Recovery Mode:** unggah dan hapus bukti ditolak seperti mutasi lain.
 - **Penyimpanan objek mati:** respons 503 `TEMPORARY_FAILURE` dengan `retryable: true`. Transaksi finansial tetap terkonfirmasi (AC-21), dan retry dengan `uploadId` yang sama aman.
 - **Worker saat penyimpanan mati:** worker menunda pemeriksaan dengan backoff 5 detik × 2ⁿ, paling lama 1 jam.
+
+## Pembersihan objek sementara
+
+- Pencatatan bukti dan penghapusan reservasi dari antrean terjadi dalam commit yang sama. Rollback meninggalkan reservasi. Jika respons commit hilang, MySQL tetap menentukan apakah objek sudah direferensikan atau masih masuk antrean.
+- Worker mengklaim reservasi setelah 48 jam, memakai usulan retensi DEF-01 sebagai default teknis. Klaim menutup reservasi untuk pencatatan bukti, dan worker melewati setiap objek yang masih direferensikan oleh tabel bukti, termasuk bukti `REMOVED` dan `REJECTED`.
+- Worker memakai lease 2 menit sebelum mengirim S3 DELETE. Jika penyimpanan gagal atau hasil DELETE tidak diketahui, job dapat diulang setelah lease habis. Worker berhenti mengambil klaim saat Financial Recovery Mode aktif. Hentikan worker sebelum restore dan verifikasi referensi bukti sebelum melanjutkan cleanup.
+- Kredensial worker memerlukan izin `s3:DeleteObject`. Pada bucket berversi, DELETE biasa membuat delete marker. Retensi versi lama mengikuti kebijakan bucket.
 
 ## UI
 
@@ -64,5 +72,5 @@ Belum termasuk: bukti offline terenkripsi, ekspor PDF/Excel, pembersihan objek y
 ## Batasan yang diketahui
 
 - Pemeriksaan isi hanya mencakup tanda tangan dan struktur. Tidak ada decode piksel penuh atau pemindaian malware.
-- Objek yang diganti atau dilepas tidak pernah dihapus, dan objek yatim dari unggahan yang gagal setelah S3 PUT tidak dibersihkan. Pembersihan menunggu job cleanup di slice berikutnya.
+- Pembersihan otomatis berlaku untuk reservasi dari migrasi 0006 ke atas. Objek yatim dari slice 1 memerlukan rekonsiliasi terpisah.
 - Bukti untuk aktivitas offline/pending belum didukung. Bukti hanya bisa dilampirkan setelah aktivitas tersinkron, dari halaman detail.

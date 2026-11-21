@@ -15,8 +15,11 @@ async fn run() -> Result<(), &'static str> {
     let mail = Mailer::from_env(origin()?, mail_key()?)?;
     let storage = Storage::from_env()?;
     let db = database(2).await?;
-    // Both loops stop on the same shutdown signal; each handler is idempotent under at-least-once.
-    tokio::join!(mail.run(&db), evidence::run(&db, &storage));
+    tokio::join!(
+        mail.run(&db),
+        evidence::run(&db, &storage),
+        evidence::run_cleanup(&db, &storage)
+    );
     db.close().await;
     Ok(())
 }

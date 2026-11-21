@@ -78,12 +78,15 @@ def put_file(client, activity_id, upload, name, body, content_type, status):
                "X-Duit-CSRF": "1", "X-Duit-File-Name": quote(name, safe="")}
     if content_type:
         headers["Content-Type"] = content_type
-    conn = http.client.HTTPConnection("127.0.0.1", client.port, timeout=30)
+    conn = http.client.HTTPConnection("127.0.0.1", client.port, timeout=40)
     try:
         conn.request("PUT", f"/api/v1/activities/{activity_id}/evidence/{upload}", body, headers)
         response = conn.getresponse()
         value = json.loads(response.read() or b"null")
-        check(response.status, status)
+        if isinstance(status, tuple):
+            check(response.status in status, True)
+        else:
+            check(response.status, status)
         check(response.headers["Cache-Control"], "no-store")
         return value
     finally:
@@ -100,24 +103,26 @@ def get_raw(client, path):
         conn.close()
 
 
-def s3_put(storage, key, body):
-    """Writes an object directly, bypassing the API: simulates a stored file changing behind its back."""
+def s3_request(storage, key, method, body=b""):
     env, host = storage["env"], f"127.0.0.1:{storage['port']}"
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     payload = hashlib.sha256(body).hexdigest()
     path = f"/{BUCKET}/{key}"
-    canonical = f"PUT\n{path}\n\nhost:{host}\nx-amz-content-sha256:{payload}\nx-amz-date:{stamp}\n\nhost;x-amz-content-sha256;x-amz-date\n{payload}"
+    canonical = f"{method}\n{path}\n\nhost:{host}\nx-amz-content-sha256:{payload}\nx-amz-date:{stamp}\n\nhost;x-amz-content-sha256;x-amz-date\n{payload}"
     scope = f"{stamp[:8]}/us-east-1/s3/aws4_request"
     to_sign = f"AWS4-HMAC-SHA256\n{stamp}\n{scope}\n{hashlib.sha256(canonical.encode()).hexdigest()}"
     key_bytes = ("AWS4" + env["DUIT_S3_SECRET_KEY"]).encode()
     for part in (stamp[:8], "us-east-1", "s3", "aws4_request"):
         key_bytes = hmac.new(key_bytes, part.encode(), hashlib.sha256).digest()
     signature = hmac.new(key_bytes, to_sign.encode(), hashlib.sha256).hexdigest()
-    request = urllib.request.Request(env["DUIT_S3_ENDPOINT"] + path, body, method="PUT", headers={
+    request = urllib.request.Request(env["DUIT_S3_ENDPOINT"] + path, body if method == "PUT" else None, method=method, headers={
         "x-amz-date": stamp, "x-amz-content-sha256": payload, "Authorization":
         f"AWS4-HMAC-SHA256 Credential={env['DUIT_S3_ACCESS_KEY']}/{scope}, SignedHeaders=host;x-amz-content-sha256;x-amz-date, Signature={signature}"})
-    with urllib.request.urlopen(request, timeout=10) as reply:
-        check(reply.status, 200)
+    try:
+        with urllib.request.urlopen(request, timeout=10) as reply:
+            return reply.status, reply.read()
+    except urllib.error.HTTPError as reply:
+        return reply.code, reply.read()
 
 
 def status_of(client, activity_id):
@@ -203,7 +208,7 @@ def evidence_test(database, mail, api_port, origin, storage):
 
     # A stored object that changed is never served, and a re-check rejects it.
     key = database.rows(f"USE {DB}; SELECT object_key FROM evidence WHERE id='{second}';")[0]
-    s3_put(storage, key, PDF.replace(b"Catalog", b"Katalog"))
+    check(s3_request(storage, key, "PUT", PDF.replace(b"Catalog", b"Katalog"))[0], 200)
     check(get_raw(alice, f"/activities/{spent}/evidence/content")[0], 500)
     database.query(f"USE {DB}; UPDATE evidence SET status='QUARANTINED', next_run_at=0 WHERE id='{second}';")
     until(alice, spent, "REJECTED")
@@ -243,6 +248,8 @@ def evidence_test(database, mail, api_port, origin, storage):
     print("Evidence AC-21: storage down after commit gives a retryable 503, the transaction stays confirmed; the "
           "same upload id succeeds later with no new transaction", flush=True)
 
+    cleanup_test(database, storage, alice, bought, retry, image, confirmed)
+
     # A deleted activity keeps its evidence readable but takes no new file.
     version = alice.request("GET", f"/activities/{bought}", 200)["version"]
     operation(alice, f"/activities/{bought}", {"expectedVersion": version}, "DELETE")
@@ -252,12 +259,53 @@ def evidence_test(database, mail, api_port, origin, storage):
     print("Evidence: removal audited; a deleted activity keeps readable evidence and refuses new files", flush=True)
 
 
+def cleanup_test(database, storage, client, activity_id, previous_upload, image, confirmed):
+    def keys():
+        return set(database.rows(f"USE {DB}; SELECT object_key FROM evidence_cleanup;"))
+
+    before = keys()
+    upload = str(uuid.uuid4())
+    database.query(f"""USE {DB}; CREATE TRIGGER fixture_evidence_failure BEFORE INSERT ON evidence
+        FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='fixture: fail after PUT';""")
+    try:
+        check(put_file(client, activity_id, upload, "parkir.png", image, "image/png", 500)["code"],
+              "INTERNAL_ERROR")
+    finally:
+        database.query(f"USE {DB}; DROP TRIGGER fixture_evidence_failure;")
+    orphan, = keys() - before
+    check(s3_request(storage, orphan, "GET"), (200, image))
+    check(client.request("GET", f"/activities/{activity_id}/evidence", 200)["id"], previous_upload)
+
+    put_file(client, activity_id, upload, "parkir.png", image, "image/png", 202)
+    until(client, activity_id, "AVAILABLE")
+    retained, = database.rows(f"USE {DB}; SELECT object_key FROM evidence WHERE id='{previous_upload}';")
+    check(keys(), before | {orphan})
+
+    # An unknown DELETE outcome keeps a sealed job eligible for another worker attempt.
+    subprocess.run(["docker", "stop", "-t", "2", storage["name"]], check=True, capture_output=True, timeout=60)
+    try:
+        database.query(f"USE {DB}; UPDATE evidence_cleanup SET next_run_at=0 WHERE object_key='{orphan}';")
+        wait_for(lambda: True if database.rows(
+            f"USE {DB}; SELECT sealed,attempts FROM evidence_cleanup WHERE object_key='{orphan}';") == ["1\t1"] else None, 30)
+    finally:
+        subprocess.run(["docker", "start", storage["name"]], check=True, capture_output=True, timeout=60)
+
+    storage_ready(storage["port"])
+    database.query(f"USE {DB}; UPDATE evidence_cleanup SET next_run_at=0 WHERE object_key='{orphan}';")
+    wait_for(lambda: True if orphan not in keys() else None, 30)
+    check(s3_request(storage, orphan, "GET")[0], 404)
+    check(s3_request(storage, retained, "GET"), (200, image))
+    check(get_raw(client, f"/activities/{activity_id}/evidence/content")[2], image)
+    check(client.request("GET", "/financial-state", 200), confirmed)
+    print("Evidence cleanup: rolled-back PUT is removed after S3 recovers; confirmed and removed evidence survive", flush=True)
+
+
 def put_file_quiet(client, activity_id, upload, image):
     try:
-        put_file(client, activity_id, upload, "parkir.png", image, "image/png", 202)
-        return True
-    except AssertionError:
-        return None  # storage still starting: 503, retried with the same upload id
+        result = put_file(client, activity_id, upload, "parkir.png", image, "image/png", (200, 202, 503))
+    except TimeoutError:
+        return None  # unknown response; the same upload id is safe to check by retry
+    return result.get("code") != "TEMPORARY_FAILURE"
 
 
 def set_file(page, selector, path):

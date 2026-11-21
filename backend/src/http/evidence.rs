@@ -107,7 +107,7 @@ async fn upload(
     .map_err(|_| evidence::refused(Refusal::TooLarge))?;
     let kind = evidence::validate(&name, &claimed, &bytes).map_err(evidence::refused)?;
     let file = Stored {
-        key: evidence::object_key(&owner, &upload),
+        key: evidence::reserve_object(db).await?,
         sha256: Sha256::digest(&bytes).to_vec(),
         size: u32::try_from(bytes.len()).map_err(|_| evidence::refused(Refusal::TooLarge))?,
         upload: upload.clone(),

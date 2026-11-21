@@ -88,6 +88,16 @@ impl Storage {
         Err(StorageError::Unavailable)
     }
 
+    pub async fn delete(&self, key: &str) -> Result<(), StorageError> {
+        let response = self
+            .send(Method::DELETE, &self.path(key), Vec::new(), None)
+            .await?;
+        if response.status() == StatusCode::NO_CONTENT {
+            return Ok(());
+        }
+        Err(StorageError::Unavailable)
+    }
+
     /// Reads a whole object. Evidence is at most 10 MB, so buffering is bounded.
     pub async fn get(&self, key: &str) -> Result<Vec<u8>, StorageError> {
         let response = self

@@ -284,8 +284,25 @@ def verify_api(database, env, smtp_server, client, work):
         yield
 
 
+@contextmanager
+def fixture_directory():
+    folder = tempfile.TemporaryDirectory(prefix="duit-phase1-", dir=ROOT)
+    try:
+        yield folder.name
+    finally:
+        for remaining in range(10, -1, -1):
+            try:
+                folder.cleanup()
+                break
+            except PermissionError:
+                if not remaining:
+                    raise
+                # Windows can briefly hold MySQL's files after the fixture has shut down.
+                time.sleep(0.5)
+
+
 def main(browser, finance=False, offline=False):
-    with tempfile.TemporaryDirectory(prefix="duit-phase1-", dir=ROOT) as workdir:
+    with fixture_directory() as workdir:
         work = Path(workdir)
         mysql_probe.WORK = work
         from phase6_evidence import evidence_test, init_bucket, object_storage
@@ -306,7 +323,7 @@ def main(browser, finance=False, offline=False):
             api = ROOT / "target/debug/api.exe"
             for _ in range(2):
                 subprocess.run([api, "migrate"], env=env, check=True, timeout=30)
-            check(database.rows(f"USE {DB}; SELECT version FROM _sqlx_migrations WHERE success=1 ORDER BY version;"), ["1", "2", "3", "4", "5"])
+            check(database.rows(f"USE {DB}; SELECT version FROM _sqlx_migrations WHERE success=1 ORDER BY version;"), ["1", "2", "3", "4", "5", "6"])
             print("MySQL migration and repeat application OK", flush=True)
             init_bucket(api, env)
             client = Client(api_port, origin)

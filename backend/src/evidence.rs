@@ -22,6 +22,8 @@ use crate::{
 pub const MAX_BYTES: usize = 10 * 1024 * 1024;
 const MAX_NAME: usize = 180;
 const WORKER_ACTOR: &str = "system:evidence-check";
+const CLEANUP_DELAY_MICROS: i64 = 48 * 60 * 60 * 1_000_000;
+const CLEANUP_LEASE_MICROS: i64 = 120 * 1_000_000;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum FileType {
@@ -175,12 +177,16 @@ pub fn clean_name(raw: &str) -> Option<String> {
     ok.then(|| name.to_owned())
 }
 
-/// Object key per owner and upload: a retry of the same upload overwrites the same object, and two
-/// owners can never collide even if a client reuses another account's upload id.
-pub fn object_key(owner: &str, upload: &str) -> String {
-    let digest = Sha256::digest(format!("{owner}:{upload}").as_bytes());
-    let hex: String = digest.iter().map(|byte| format!("{byte:02x}")).collect();
-    format!("ev/{hex}")
+/// A fresh key per request keeps a retry from overwriting the bytes of a winning concurrent upload.
+pub async fn reserve_object(db: &MySqlPool) -> Result<String, Failure> {
+    let id = crypto::id().map_err(|_| Failure::Internal)?;
+    let key = format!("ev/v2/{id}");
+    sqlx::query("INSERT INTO evidence_cleanup (object_key,next_run_at) VALUES (?,?)")
+        .bind(&key)
+        .bind(Moment::now().0 + CLEANUP_DELAY_MICROS)
+        .execute(db)
+        .await?;
+    Ok(key)
 }
 
 #[derive(FromRow, Serialize)]
@@ -278,6 +284,14 @@ pub struct Stored {
 /// previous active evidence becomes REMOVED, and the audit entry commits with it.
 pub async fn record(db: &MySqlPool, owner: &str, file: Stored) -> Result<(), Failure> {
     let mut tx = db.begin().await?;
+    // Claiming the cleanup row and recording evidence are mutually exclusive, including on retry.
+    let reservation = sqlx::query("DELETE FROM evidence_cleanup WHERE object_key=? AND NOT sealed")
+        .bind(&file.key)
+        .execute(&mut *tx)
+        .await?;
+    if reservation.rows_affected() != 1 {
+        return Err(Failure::Temporary);
+    }
     let deleted: Option<bool> =
         sqlx::query_scalar("SELECT deleted FROM activities WHERE owner_id=? AND id=? FOR UPDATE")
             .bind(owner)
@@ -417,6 +431,64 @@ pub async fn run(db: &MySqlPool, storage: &Storage) {
             }
         }
     }
+}
+
+pub async fn run_cleanup(db: &MySqlPool, storage: &Storage) {
+    let mut poll = tokio::time::interval(Duration::from_secs(5));
+    poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let shutdown = crate::shutdown();
+    tokio::pin!(shutdown);
+    loop {
+        tokio::select! {
+            _ = &mut shutdown => break,
+            _ = poll.tick() => {
+                if cleanup_next(db, storage).await.is_err() {
+                    eprintln!("Temporary evidence cleanup failed; will retry");
+                }
+            }
+        }
+    }
+}
+
+async fn cleanup_next(db: &MySqlPool, storage: &Storage) -> Result<(), Failure> {
+    let mut tx = db.begin().await?;
+    let recovery: bool =
+        sqlx::query_scalar("SELECT active FROM financial_recovery WHERE id=1 FOR SHARE")
+            .fetch_one(&mut *tx)
+            .await?;
+    if recovery {
+        return Ok(());
+    }
+    let now = Moment::now().0;
+    let key: Option<String> = sqlx::query_scalar(
+        "SELECT object_key FROM evidence_cleanup AS job WHERE next_run_at<=?
+         AND NOT EXISTS (SELECT 1 FROM evidence WHERE object_key=job.object_key)
+         ORDER BY next_run_at,object_key LIMIT 1 FOR UPDATE SKIP LOCKED",
+    )
+    .bind(now)
+    .fetch_optional(&mut *tx)
+    .await?;
+    let Some(key) = key else {
+        return Ok(());
+    };
+    let lease_until = now + CLEANUP_LEASE_MICROS;
+    sqlx::query(
+        "UPDATE evidence_cleanup SET sealed=TRUE,next_run_at=?,attempts=attempts+1 WHERE object_key=?",
+    )
+    .bind(lease_until)
+    .bind(&key)
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+
+    // A sealed key can never become evidence. Repeat DELETE after a timeout or worker crash.
+    storage.delete(&key).await.map_err(|_| Failure::Temporary)?;
+    sqlx::query("DELETE FROM evidence_cleanup WHERE object_key=? AND next_run_at=?")
+        .bind(&key)
+        .bind(lease_until)
+        .execute(db)
+        .await?;
+    Ok(())
 }
 
 /// At-least-once: a crash after the storage read only repeats the read. The lease token fences the
@@ -579,17 +651,10 @@ mod tests {
     }
 
     #[test]
-    fn names_and_keys() {
+    fn cleans_display_names() {
         assert_eq!(clean_name("  struk.png "), Some("struk.png".into()));
         assert_eq!(clean_name("a/b.png"), None);
         assert_eq!(clean_name("a\nb.png"), None);
         assert_eq!(clean_name(""), None);
-        assert_ne!(object_key("owner-a", "u"), object_key("owner-b", "u"));
-        assert_eq!(object_key("o", "u"), object_key("o", "u"));
-        assert!(
-            object_key("o", "u")
-                .bytes()
-                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'/')
-        );
     }
 }
