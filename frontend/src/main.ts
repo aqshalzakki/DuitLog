@@ -6,6 +6,10 @@ import AuthPage from './AuthPage.vue'
 import OfflinePage from './OfflinePage.vue'
 import SessionPage from './SessionPage.vue'
 import SyncPage from './SyncPage.vue'
+import DashboardPage from './DashboardPage.vue'
+import EntryPage from './EntryPage.vue'
+import OnboardingPage from './OnboardingPage.vue'
+import { useEntries, useFinance } from './finance'
 import { useSync } from './sync/engine'
 import { useAuth } from './session'
 import { enrolledOwner, useVault } from './vault/store'
@@ -15,7 +19,9 @@ const pinia = createPinia()
 const router = createRouter({
   history: createWebHistory(),
   routes: [
-    { path: '/', redirect: '/account' },
+    { path: '/', name: 'home', component: DashboardPage, meta: { offline: true } },
+    { path: '/onboarding', name: 'onboarding', component: OnboardingPage, meta: { session: true, verified: true } },
+    { path: '/add/:kind(increase|deduct|loan|repayment)', name: 'add', component: EntryPage, meta: { offline: true } },
     { path: '/login', name: 'login', component: AuthPage },
     { path: '/register', name: 'register', component: AuthPage },
     { path: '/forgot-password', name: 'forgot', component: AuthPage },
@@ -32,6 +38,8 @@ const router = createRouter({
 const auth = useAuth(pinia)
 const vault = useVault(pinia)
 const sync = useSync(pinia)
+const finance = useFinance(pinia)
+const entries = useEntries(pinia)
 // Server unreachable (not 401) with a vault on this device: offline capability, not "logged out".
 const offlineBoot = () => !auth.profile && !!auth.loadError && !!enrolledOwner()
 
@@ -75,6 +83,9 @@ document.addEventListener('visibilitychange', () => vault.checkIdle())
 setInterval(() => vault.checkIdle(), 15_000)
 
 // Foreground-first sync: on unlock, when back online or visible, and on a slow timer.
+// Another owner, or a lock with no live session, drops in-memory figures and form state.
+watch(() => auth.profile?.id ?? vault.owner, () => { finance.clear(); entries.clear() })
+watch(() => vault.status, (status) => { if (status === 'hard' && !auth.profile) finance.clear() })
 watch(() => [vault.status, vault.expired, auth.profile?.id], async () => {
   await sync.refresh() // also clears decrypted items on any lock
   void sync.cycle(true)

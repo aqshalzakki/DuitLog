@@ -1,9 +1,12 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { type Profile, useAuth } from './session'
 import { VaultError, useVault, validPassphrase } from './vault/store'
 
 const auth = useAuth()
+const route = useRoute()
+const router = useRouter()
 const vault = useVault()
 const busy = ref(false)
 const error = ref('')
@@ -62,6 +65,9 @@ const unlock = () => run(async () => {
   form.value.secret = ''
   if (online.value) await revalidate().catch(() => undefined)
   notice.value = vault.expired ? '' : 'Data offline terbuka.'
+  // Back to the page that asked for the unlock, in-app only (a full load would lock again).
+  const back = route.query.back
+  if (!vault.expired && typeof back === 'string' && back.startsWith('/') && !back.startsWith('//')) await router.replace(back)
 })
 
 const resetPin = () => run(async () => {

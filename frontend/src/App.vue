@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { nextTick, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuth } from './session'
 import { VaultError, useVault } from './vault/store'
@@ -10,6 +10,8 @@ const router = useRouter()
 const pin = ref('')
 const pinError = ref('')
 const pinInput = ref<HTMLInputElement>()
+// Offline boot: no live session, but this tab opened the vault.
+const offline = computed(() => !auth.profile && !!auth.loadError && vault.status !== 'none')
 
 watch(() => vault.status, async (status) => {
   pin.value = ''
@@ -42,11 +44,16 @@ async function strongUnlock() {
   <a class="skip-link" href="#content">Langsung ke konten</a>
   <header class="topbar">
     <RouterLink to="/" class="wordmark"><span aria-hidden="true">D</span>Duit Log</RouterLink>
-    <nav v-if="auth.profile" aria-label="Akun">
-      <RouterLink :to="auth.profile.emailVerified ? '/account' : '/verify-email'">Akun</RouterLink>
-      <RouterLink to="/sessions">Perangkat</RouterLink>
-      <RouterLink v-if="auth.profile.emailVerified" to="/offline">Offline</RouterLink>
-      <RouterLink v-if="auth.profile.emailVerified" to="/sync">Sinkronisasi</RouterLink>
+    <nav v-if="auth.profile || offline" aria-label="Utama">
+      <template v-if="auth.profile?.emailVerified || offline">
+        <RouterLink to="/">Beranda</RouterLink>
+        <RouterLink to="/sync">Sinkronisasi</RouterLink>
+        <RouterLink to="/offline">Offline</RouterLink>
+      </template>
+      <template v-if="auth.profile">
+        <RouterLink :to="auth.profile.emailVerified ? '/account' : '/verify-email'">Akun</RouterLink>
+        <RouterLink to="/sessions">Perangkat</RouterLink>
+      </template>
     </nav>
   </header>
   <main id="content" tabindex="-1">

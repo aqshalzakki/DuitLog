@@ -259,6 +259,8 @@ def offline_test(browser, env, origin, api_port, work, mail):
         run(chrome, origin, api_port, mail)
         from phase4_sync_client import sync_client_test
         sync_client_test(chrome, origin, api_port, mail)
+        from phase5_ui import ui_test
+        ui_test(chrome, origin, api_port, mail)
 
 
 def run(chrome, origin, api_port, mail):

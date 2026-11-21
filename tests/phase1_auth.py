@@ -328,6 +328,8 @@ def main(browser, finance=False, offline=False):
                         from phase1_browser import browser_test
                         browser_test(browser, env, origin, api_port, work, mail)
                     if browser and offline:
+                        # Disposable fixture: the suites together register more than the real per-IP limit.
+                        database.query(f"USE {DB}; DELETE FROM auth_rate_limits;")
                         from phase4_offline import offline_test
                         offline_test(browser, env, origin, api_port, work, mail)
 

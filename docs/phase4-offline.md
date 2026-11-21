@@ -96,4 +96,4 @@ Tidak diuji di browser: `RETRYABLE`/`OUTCOME_UNKNOWN`/`NOT_PROCESSED` per item, 
 
 **Batas:** `GET /operations/{id}` tidak membawa owner. Bila sesi berganti akun di tengah siklus, 404 dari akun lain dapat membersihkan `unsure` setelah 10 menit. Kirim ulang tetap ditolak server (`SESSION_OWNER_MISMATCH`), jadi tidak ada efek finansial.
 
-Belum: UI untuk mencatat transaksi offline dan mengoreksi konflik (Fase 5, saat ini hanya lewat hook uji), saldo estimasi lokal (BR-OFF-18, PR-OFF-12), peringatan logout bila ada pending, notifikasi lintas tab saat antrean berubah, dan uji di browser selain Chrome desktop. **G2 belum ditutup:** perlu review kontrak ini, uji deadlock 1213 sejati, dan alur end-to-end dari UI Fase 5.
+UI untuk mencatat dan mengoreksi ada di [phase5-ui.md](phase5-ui.md). Belum: saldo estimasi lokal (BR-OFF-18, PR-OFF-12), peringatan logout bila ada pending, notifikasi lintas tab saat antrean berubah, dan uji di browser selain Chrome desktop. **G2 belum ditutup:** perlu review kontrak ini, uji deadlock 1213 sejati, dan alur end-to-end dari UI Fase 5.

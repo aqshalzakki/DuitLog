@@ -1,0 +1,21 @@
+/** User-facing text for server and vault codes. */
+export const REASONS: Record<string, string> = {
+  INVALID_FUTURE_EFFECTIVE_TIME: 'Waktu efektif berada di masa depan.',
+  DEPENDENCY_BLOCKED: 'Menunggu aktivitas pendahulu.',
+  ALREADY_CONFIRMED_ACTIVITY: 'Aktivitas ini sudah tercatat dari percobaan lain. Periksa riwayat sebelum membatalkan.',
+  CATEGORY_ARCHIVED: 'Kategori sudah diarsipkan.',
+  BORROWER_ARCHIVED: 'Peminjam sudah diarsipkan.',
+  RECEIVABLE_NEGATIVE: 'Kronologi membuat piutang negatif.',
+  VALIDATION_ERROR: 'Isian tidak valid.',
+  OPENING_REQUIRED: 'Tentukan saldo awal terlebih dahulu.',
+  TEMPORARY_FAILURE: 'Layanan sibuk, akan dicoba lagi.',
+  FINANCIAL_INTEGRITY_FROZEN: 'Akun sedang dalam pemeriksaan integritas. Sinkronisasi ditahan.',
+  FINANCIAL_RECOVERY_ACTIVE: 'Pemulihan finansial sedang berlangsung. Sinkronisasi ditahan.',
+  SESSION_OWNER_MISMATCH: 'Sesi aktif milik akun lain. Tidak ada yang disinkronkan.',
+  CORRUPTED: 'Data offline rusak atau tidak dapat diverifikasi. Antrean tidak ditampilkan.',
+  LOCKED: 'Data offline terkunci.',
+  EXPIRED: 'Validasi online diperlukan.',
+  OPENING_ALREADY_DECIDED: 'Saldo awal sudah ditentukan.',
+  NOT_FOUND: 'Data tidak ditemukan.',
+  STORAGE: 'Tidak dapat menyimpan di perangkat. Tidak ada yang tersimpan.',
+}

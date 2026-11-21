@@ -2,6 +2,7 @@
 import { ref } from 'vue'
 import { type QueueItem, type State, SyncError, useSync } from './sync/engine'
 import { VaultError, useVault } from './vault/store'
+import { REASONS as reasons } from './messages'
 
 const sync = useSync()
 const vault = useVault()
@@ -15,23 +16,6 @@ const labels: Record<State, string> = {
   CONFLICT: 'Konflik', BLOCKED: 'Tertahan', SYNCED: 'Tersinkron',
 }
 const kinds: Record<string, string> = { INCREASE: 'Pemasukan', DEDUCT: 'Pengeluaran', LOAN: 'Pinjaman', REPAYMENT: 'Pelunasan' }
-const reasons: Record<string, string> = {
-  INVALID_FUTURE_EFFECTIVE_TIME: 'Waktu efektif berada di masa depan.',
-  DEPENDENCY_BLOCKED: 'Menunggu aktivitas pendahulu.',
-  ALREADY_CONFIRMED_ACTIVITY: 'Aktivitas ini sudah tercatat dari percobaan lain. Periksa riwayat sebelum membatalkan.',
-  CATEGORY_ARCHIVED: 'Kategori sudah diarsipkan.',
-  BORROWER_ARCHIVED: 'Peminjam sudah diarsipkan.',
-  RECEIVABLE_NEGATIVE: 'Kronologi membuat piutang negatif.',
-  VALIDATION_ERROR: 'Isian tidak valid.',
-  OPENING_REQUIRED: 'Tentukan saldo awal terlebih dahulu.',
-  TEMPORARY_FAILURE: 'Layanan sibuk, akan dicoba lagi.',
-  FINANCIAL_INTEGRITY_FROZEN: 'Akun sedang dalam pemeriksaan integritas. Sinkronisasi ditahan.',
-  FINANCIAL_RECOVERY_ACTIVE: 'Pemulihan finansial sedang berlangsung. Sinkronisasi ditahan.',
-  SESSION_OWNER_MISMATCH: 'Sesi aktif milik akun lain. Tidak ada yang disinkronkan.',
-  CORRUPTED: 'Data offline rusak atau tidak dapat diverifikasi. Antrean tidak ditampilkan.',
-  LOCKED: 'Data offline terkunci.',
-  EXPIRED: 'Validasi online diperlukan.',
-}
 const syncErrors: Record<string, string> = {
   IN_FLIGHT: 'Pengiriman sebelumnya belum dipastikan. Tunggu hasilnya dulu.',
   HAS_CHILDREN: 'Aktivitas lain bergantung pada item ini. Batalkan item tersebut dulu.',
@@ -45,6 +29,10 @@ function describe(item: QueueItem) {
   const title = item.payload.title ? ` · ${item.payload.title}` : ''
   return `${kinds[item.payload.kind as string] ?? item.payload.kind} Rp${money.format(BigInt(item.payload.amount as string))}${title}`
 }
+
+// A new attempt cannot fix ALREADY_CONFIRMED_ACTIVITY: the activity is already on the server.
+const fixable = (item: QueueItem) => item.type === 'ACTIVITY' && item.state === 'CONFLICT' && sync.editable(item)
+  && item.code !== 'ALREADY_CONFIRMED_ACTIVITY'
 
 async function cancel(item: QueueItem) {
   notice.value = ''
@@ -78,6 +66,7 @@ async function cancel(item: QueueItem) {
           <span class="state">{{ labels[item.state] }}</span>
           <span class="hint">Dicatat {{ date.format(new Date(item.createdAt)) }}</span>
           <span v-if="item.code && reasons[item.code]" class="hint">{{ reasons[item.code] }}</span>
+          <RouterLink v-if="fixable(item)" :to="{ path: '/add/' + String(item.payload.kind).toLowerCase(), query: { fix: item.clientActivityId } }">Perbaiki</RouterLink>
           <button v-if="sync.editable(item)" type="button" class="secondary" @click="cancel(item)">Batalkan</button>
         </li>
       </ul>

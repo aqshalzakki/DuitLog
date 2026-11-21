@@ -67,6 +67,16 @@ export class SyncError extends Error {
   }
 }
 
+/**
+ * True only when the app itself refused the request before anything ran: a coded 4xx, or 503 for
+ * recovery or a busy lock. A 500 can follow a commit; a timeout, network error or bare 5xx may leave
+ * the request running on the server, so those are unknown outcomes.
+ */
+export function refused(failure: unknown): failure is ApiError {
+  return failure instanceof ApiError && !!failure.code && (failure.status < 500
+    || (failure.status === 503 && ['FINANCIAL_RECOVERY_ACTIVE', 'TEMPORARY_FAILURE'].includes(failure.code)))
+}
+
 const encoder = new TextEncoder()
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
@@ -269,11 +279,7 @@ export const useSync = defineStore('sync', () => {
           { owner, items: chunk.map(wire) }, AbortSignal.timeout(SEND_TIMEOUT_MS))
         results = reply?.results ?? []
       } catch (failure) {
-        // Only a coded refusal (4xx, or 503 recovery/busy) proves no item ran. A 500 can come after items
-        // committed; a timeout, network error or bare 5xx may leave the batch running on the server.
-        const refused = failure instanceof ApiError && !!failure.code && (failure.status < 500
-          || (failure.status === 503 && ['FINANCIAL_RECOVERY_ACTIVE', 'TEMPORARY_FAILURE'].includes(failure.code)))
-        if (!refused) {
+        if (!refused(failure)) {
           for (const item of chunk) await put(item, { state: 'CHECKING_OUTCOME', unsure: sentAt })
           return 'retry'
         }
@@ -281,7 +287,7 @@ export const useSync = defineStore('sync', () => {
         for (const item of chunk) await put(item, { state: retry ? 'RETRY_WAITING' : 'PENDING', ...(retry ? { code: failure.code } : {}) })
         if (failure.code === 'SESSION_OWNER_MISMATCH') vault.hardLock()
         if (retry) return 'retry'
-        error.value = failure.code
+        error.value = failure.code ?? 'FAILED'
         return 'stop'
       }
       const got = new Map(results.map((result) => [result.clientActivityId, result]))
@@ -352,11 +358,14 @@ export const useSync = defineStore('sync', () => {
   }
 
   /** A correction is a new attempt of the same logical activity, never a second activity. */
-  const correct = (id: string, fields: Record<string, unknown>) => change(id, (item) => {
-    const payload = clean(item.type, fields)
-    fits({ ...item, payload })
-    return put(item, { payload, attemptId: crypto.randomUUID(), state: 'PENDING', code: undefined, details: undefined })
-  })
+  const correct = async (id: string, fields: Record<string, unknown>) => {
+    await change(id, (item) => {
+      const payload = clean(item.type, fields)
+      fits({ ...item, payload })
+      return put(item, { payload, attemptId: crypto.randomUUID(), state: 'PENDING', code: undefined, details: undefined })
+    })
+    void cycle(true)
+  }
 
   const cancel = (id: string) => change(id, async (_, list) => {
     if (list.some((other) => other.state !== 'SYNCED' && parents(other).includes(id))) throw new SyncError('HAS_CHILDREN')
