@@ -5,6 +5,8 @@ import App from './App.vue'
 import AuthPage from './AuthPage.vue'
 import OfflinePage from './OfflinePage.vue'
 import SessionPage from './SessionPage.vue'
+import SyncPage from './SyncPage.vue'
+import { useSync } from './sync/engine'
 import { useAuth } from './session'
 import { enrolledOwner, useVault } from './vault/store'
 import './style.css'
@@ -22,12 +24,14 @@ const router = createRouter({
     { path: '/account', name: 'account', component: SessionPage, meta: { session: true, verified: true } },
     { path: '/sessions', name: 'sessions', component: SessionPage, meta: { session: true } },
     { path: '/offline', name: 'offline', component: OfflinePage, meta: { offline: true } },
+    { path: '/sync', name: 'sync', component: SyncPage, meta: { offline: true } },
     { path: '/:pathMatch(.*)*', redirect: '/' },
   ],
 })
 
 const auth = useAuth(pinia)
 const vault = useVault(pinia)
+const sync = useSync(pinia)
 // Server unreachable (not 401) with a vault on this device: offline capability, not "logged out".
 const offlineBoot = () => !auth.profile && !!auth.loadError && !!enrolledOwner()
 
@@ -70,9 +74,22 @@ addEventListener('focus', () => vault.checkIdle())
 document.addEventListener('visibilitychange', () => vault.checkIdle())
 setInterval(() => vault.checkIdle(), 15_000)
 
+// Foreground-first sync: on unlock, when back online or visible, and on a slow timer.
+watch(() => [vault.status, vault.expired, auth.profile?.id], async () => {
+  await sync.refresh() // also clears decrypted items on any lock
+  void sync.cycle(true)
+})
+addEventListener('online', () => void sync.cycle(true))
+document.addEventListener('visibilitychange', () => void sync.cycle())
+setInterval(() => void sync.cycle(), 30_000)
+
 if (import.meta.env.DEV) {
   // Test hook for the browser suite only; stripped from production builds.
-  Object.assign(window, { __duitVault: { save: vault.save, read: vault.read, list: vault.list } })
+  Object.assign(window, {
+    __duitVault: { save: vault.save, read: vault.read, list: vault.list },
+    __duitSync: { enqueue: sync.enqueue, correct: sync.correct, cancel: sync.cancel, cycle: sync.cycle,
+      items: async () => { await sync.refresh(); return JSON.parse(JSON.stringify(sync.items)) }, state: () => ({ running: sync.running, error: sync.error }) },
+  })
 }
 
 createApp(App).use(pinia).use(router).mount('#app')

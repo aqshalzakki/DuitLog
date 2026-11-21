@@ -46,6 +46,7 @@ async function strongUnlock() {
       <RouterLink :to="auth.profile.emailVerified ? '/account' : '/verify-email'">Akun</RouterLink>
       <RouterLink to="/sessions">Perangkat</RouterLink>
       <RouterLink v-if="auth.profile.emailVerified" to="/offline">Offline</RouterLink>
+      <RouterLink v-if="auth.profile.emailVerified" to="/sync">Sinkronisasi</RouterLink>
     </nav>
   </header>
   <main id="content" tabindex="-1">

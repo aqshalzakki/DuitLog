@@ -20,16 +20,19 @@ export type Device = {
 export class ApiError extends Error {
   constructor(
     readonly status: number,
-    value: { message?: string; fieldErrors?: Record<string, string> },
+    value: { code?: string; message?: string; fieldErrors?: Record<string, string> },
   ) {
     super(value.message ?? 'Permintaan gagal diproses.')
     this.fields = value.fieldErrors ?? {}
+    this.code = typeof value.code === 'string' ? value.code : undefined
   }
 
   readonly fields: Record<string, string>
+  /** Present only when the app itself answered; a proxy error or timeout carries none. */
+  readonly code: string | undefined
 }
 
-export async function api<T>(path: string, method = 'GET', payload?: object): Promise<T> {
+export async function api<T>(path: string, method = 'GET', payload?: object, signal?: AbortSignal): Promise<T> {
   const headers = new Headers({ Accept: 'application/json' })
   if (method !== 'GET') headers.set('X-Duit-CSRF', '1')
   if (payload !== undefined) headers.set('Content-Type', 'application/json')
@@ -38,6 +41,7 @@ export async function api<T>(path: string, method = 'GET', payload?: object): Pr
     headers,
     credentials: 'same-origin',
     body: payload === undefined ? undefined : JSON.stringify(payload),
+    signal,
   })
   if (!response.ok) throw new ApiError(response.status, await response.json().catch(() => ({})))
   if (response.status === 204 || response.status === 202) return undefined as T
@@ -102,15 +106,15 @@ export const useAuth = defineStore('auth', () => {
     }
   }
 
-  async function authorized<T>(path: string, method = 'GET', payload?: object): Promise<T> {
+  async function authorized<T>(path: string, method = 'GET', payload?: object, signal?: AbortSignal): Promise<T> {
     try {
-      return await api<T>(path, method, payload)
+      return await api<T>(path, method, payload, signal)
     } catch (error) {
       if (!unauthorized(error)) throw error
     }
     try {
       await refreshSession()
-      return await api<T>(path, method, payload)
+      return await api<T>(path, method, payload, signal)
     } catch (error) {
       if (unauthorized(error)) clear()
       throw error

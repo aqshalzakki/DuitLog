@@ -44,6 +44,8 @@ pub(super) fn routes() -> Router<AppState> {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Batch {
+    /// Owner of the device vault the items came from; the session cookie is shared by every tab.
+    owner: String,
     items: Vec<Map<String, Value>>,
 }
 
@@ -69,6 +71,9 @@ async fn sync_items(
         return Err(Code::ValidationError.into());
     }
     let owner = actor.0.owner_id;
+    if batch.owner != owner {
+        return Err(Code::SessionOwnerMismatch.into());
+    }
     financial::sync_allowed(&state.auth.db, &owner).await?;
     // Spawned so a dropped client connection cannot cancel the batch between items.
     let results = tokio::spawn(sync::run(state.auth.db.clone(), owner, items))
@@ -152,6 +157,10 @@ fn rejection(reason: &Rejection, attempt: Option<Uuid>) -> Response {
         Code::InvalidActivityState => (
             StatusCode::CONFLICT,
             "Tindakan ini tidak tersedia untuk aktivitas tersebut.",
+        ),
+        Code::SessionOwnerMismatch => (
+            StatusCode::CONFLICT,
+            "Sesi aktif milik akun lain. Tidak ada yang disinkronkan.",
         ),
     };
     let mut body = json!({

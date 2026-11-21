@@ -184,3 +184,4 @@ def financial_test(database, env, mail, port, origin):
     check(database.rows(f"USE {DB}; SELECT COUNT(*) FROM financial_accounts WHERE owner_id IN ('{aid}','{bid}');"), ["2"])
     print("Financial Core MySQL: snapshots, history, receivable prefixes, categories, owner scope, "
           "parallel writes, idempotency, audit rollback and recovery/integrity guards OK", flush=True)
+    use_db(database, "UPDATE financial_recovery SET active=FALSE WHERE id=1;")  # later suites share this database

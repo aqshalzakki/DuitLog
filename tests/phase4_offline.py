@@ -21,13 +21,19 @@ class Page:
         self.ws = websocket.create_connection(url, suppress_origin=True, timeout=30)
         self.step = 0
         self.errors = []
+        self.paused = []  # Fetch.requestPaused events, for interception tests
+        self.sent = []  # bodies of every /sync/items request this page sent
 
     def cdp(self, method, **params):
         self.step += 1
         self.ws.send(json.dumps({"id": self.step, "method": method, "params": params}))
         while True:
             reply = json.loads(self.ws.recv())
-            if reply.get("method") == "Runtime.exceptionThrown":
+            if reply.get("method") == "Fetch.requestPaused":
+                self.paused.append(reply["params"])
+            elif reply.get("method") == "Network.requestWillBeSent" and reply["params"]["request"]["url"].endswith("/sync/items"):
+                self.sent.append(json.loads(reply["params"]["request"].get("postData") or "{}"))
+            elif reply.get("method") == "Runtime.exceptionThrown":
                 self.errors.append(reply["params"]["exceptionDetails"].get("exception", {}).get("description"))
             elif reply.get("method") == "Runtime.consoleAPICalled" and reply["params"]["type"] == "error":
                 self.errors.append(" ".join(str(a.get("value", a.get("description"))) for a in reply["params"]["args"]))
@@ -249,7 +255,10 @@ def offline_test(browser, env, origin, api_port, work, mail):
             except OSError:
                 return None
         wait_for(ready)
-        run(Chrome(browser, env, work, origin), origin, api_port, mail)
+        chrome = Chrome(browser, env, work, origin)
+        run(chrome, origin, api_port, mail)
+        from phase4_sync_client import sync_client_test
+        sync_client_test(chrome, origin, api_port, mail)
 
 
 def run(chrome, origin, api_port, mail):

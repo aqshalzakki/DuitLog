@@ -25,8 +25,13 @@ def borrower(name):
     return {**ids(), "type": "BORROWER", "name": name}
 
 
-def sync(client, items, status=200):
-    return client.request("POST", "/sync/items", status, data={"items": items})
+def owner(client):
+    return client.request("GET", "/me", 200)["id"]
+
+
+def sync(client, items, status=200, as_owner=None):
+    data = {"owner": as_owner or owner(client), "items": items}
+    return client.request("POST", "/sync/items", status, data=data)
 
 
 def totals(client):
@@ -104,7 +109,7 @@ def lost_response(database, alice, aid, slow):
         wait_for(lambda: True if database.rows("SELECT COUNT(*) FROM information_schema.innodb_trx "
                                                "WHERE trx_query LIKE 'SELECT SLEEP(1.5)%';") == ["1"] else None)
     conn = http.client.HTTPConnection("127.0.0.1", alice.port, timeout=10)
-    conn.request("POST", "/api/v1/sync/items", json.dumps({"items": batch}), {
+    conn.request("POST", "/api/v1/sync/items", json.dumps({"owner": aid, "items": batch}), {
         "Cookie": "; ".join(f"{k}={v}" for k, v in alice.cookies.items()), "Origin": alice.origin,
         "X-Duit-CSRF": "1", "Content-Type": "application/json"})
     if slow:
@@ -161,6 +166,14 @@ def envelope_and_scope(alice, bob, alice_borrower):
     check((result[0]["status"], result[0]["code"]), ("BLOCKED", "DEPENDENCY_BLOCKED"))
     check((result[1]["status"], result[1]["code"]), ("REJECTED", "NOT_FOUND"))
     check(totals(bob), bob_start)
+
+    # The cookie belongs to the browser: a vault of Alice syncing while Bob is signed in commits nothing.
+    stray = act("INCREASE", 7)
+    check(sync(bob, [stray], 409, as_owner=owner(alice))["code"], "SESSION_OWNER_MISMATCH")
+    alice.request("POST", "/sync/items", 422, data={"items": [act("INCREASE", 1)]})
+    check(totals(bob), bob_start)
+    bob.request("GET", "/operations/" + stray["attemptId"], 404)
+    alice.request("GET", "/operations/" + stray["attemptId"], 404)
 
 
 def holds(database, alice):

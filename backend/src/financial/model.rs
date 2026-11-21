@@ -178,6 +178,7 @@ pub enum Code {
     FinancialRecoveryActive,
     TemporaryFailure,
     OutcomeUnknown,
+    SessionOwnerMismatch,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

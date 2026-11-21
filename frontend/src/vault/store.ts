@@ -372,6 +372,12 @@ export const useVault = defineStore('vault', () => {
     return out
   }
 
+  async function remove(id: string) {
+    ready()
+    if (!id || id.startsWith('__')) throw new VaultError('INVALID')
+    await write((_, records) => records.delete(id))
+  }
+
   async function erase() {
     const target = owner.value
     if (!target) return
@@ -388,6 +394,6 @@ export const useVault = defineStore('vault', () => {
   return {
     owner, status, expired, verifiedAt, pinFailures,
     load, release, hardLock, prepare, enroll, unlock, unlockPin, touch, checkIdle,
-    resetPin, rotate, draftRecovery, revalidate, save, read, list, erase,
+    resetPin, rotate, draftRecovery, revalidate, save, read, list, remove, erase,
   }
 })
