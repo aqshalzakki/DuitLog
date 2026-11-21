@@ -35,7 +35,7 @@ def slice6_test(chrome, origin, api_port, mail):
         page.see("document.querySelector('[data-action=DEFAULT_CATEGORIES_CREATED]')?.textContent.includes('Kategori default dibuat')")
         print("Default categories UI: a new account is offered the ten defaults; the audit names them", flush=True)
 
-        link(page, "Riwayat")
+        link(page, "Transaksi")  # bottom-nav slot for Riwayat
         page.see("document.querySelectorAll('[data-history] li').length === 2")
         page.js("document.querySelector('[data-history-filter]').closest('details').open = true")
         page.fill("#q", "50%")

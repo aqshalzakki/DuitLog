@@ -608,8 +608,10 @@ async fn lookup(
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct AuditQuery {
     before: Option<u64>,
+    resource_id: Option<Uuid>,
 }
 
 #[derive(Deserialize)]
@@ -654,6 +656,12 @@ async fn audit(
 ) -> Result<Json<Value>, Failure> {
     let Query(query) = query.map_err(|_| Failure::from(Code::ValidationError))?;
     Ok(Json(
-        financial::audit_page(&state.auth.db, &actor.0.owner_id, query.before).await?,
+        financial::audit_page(
+            &state.auth.db,
+            &actor.0.owner_id,
+            query.before,
+            query.resource_id.map(|id| id.to_string()).as_deref(),
+        )
+        .await?,
     ))
 }

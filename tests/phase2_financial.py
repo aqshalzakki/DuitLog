@@ -112,6 +112,14 @@ def financial_test(database, env, mail, port, origin):
     check(alice.request("GET", "/activities?deleted=true", 200)["items"][0]["id"], cat_activity["resourceId"])
     operation(alice, cat_path + "/restore", {"expectedVersion": 3})
     check(alice.request("GET", cat_path, 200)["categoryId"], cat_id)
+    # PR-HIS-03: related audit per resource, owner-scoped, including snapshot recalculations.
+    related = lambda rid, who=alice: [i["action"] for i in who.request("GET", "/audit?resourceId=" + rid, 200)["items"]]
+    check(related(cat_activity["resourceId"]), ["ACTIVITY_RESTORED", "ACTIVITY_DELETED", "ACTIVITY_EDITED", "ACTIVITY_CREATED"])
+    opening_audit = related(opening["resourceId"])
+    check((opening_audit[-1], opening_audit.count("ACTIVITY_CREATED") >= 1, "ACTIVITY_EDITED" in opening_audit),
+          ("OPENING_BALANCE", True, True))  # the backdated insert and edit recalculated its delta
+    check(related(cat_activity["resourceId"], bob), [])
+    check(alice.request("GET", "/audit?resourceId=nope", 422)["code"], "VALIDATION_ERROR")
     check(next(c for c in alice.request("GET", "/categories", 200) if c["id"] == cat_id)["archived"], True)
 
     borrower = operation(alice, "/borrowers", {"name": "Same name", "phone": "123"})

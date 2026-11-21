@@ -585,17 +585,26 @@ pub(crate) async fn audit_page(
     db: &MySqlPool,
     owner: &str,
     before: Option<u64>,
+    resource: Option<&str>,
 ) -> Result<Value, Failure> {
+    // PR-HIS-03: entries about one resource, plus entries whose replay recalculated it as a snapshot.
+    // shortcut: JSON lookups scan the owner's audit rows; add a resource_id column with an index once
+    // audit history reaches tens of thousands of rows per owner.
     let rows: Vec<AuditRow> = sqlx::query_as(
         "SELECT a.id,a.actor,a.action,a.action_at,a.attempt_id,a.details FROM financial_audit a
         WHERE a.owner_id=? AND (? IS NULL OR (a.action_at,a.id) <
           (SELECT b.action_at,b.id FROM financial_audit b WHERE b.owner_id=? AND b.id=?))
+        AND (? IS NULL OR JSON_UNQUOTE(JSON_EXTRACT(a.details,'$.resourceId'))=?
+          OR JSON_CONTAINS(COALESCE(JSON_EXTRACT(a.details,'$.snapshotChanges[*].id'),JSON_ARRAY()),JSON_QUOTE(?)))
         ORDER BY a.action_at DESC,a.id DESC LIMIT 51",
     )
     .bind(owner)
     .bind(before)
     .bind(owner)
     .bind(before)
+    .bind(resource)
+    .bind(resource)
+    .bind(resource)
     .fetch_all(db)
     .await?;
     let next = (rows.len() > 50).then(|| rows[49].id);

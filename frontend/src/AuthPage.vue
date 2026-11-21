@@ -61,13 +61,13 @@ async function submit() {
         password.value = ''
         await auth.getProfile()
         auth.notify()
-        await router.replace({ name: 'account' })
+        await router.replace({ name: 'home' }) // the guards send an unverified account to verification
         break
       case 'verify':
         await auth.authorized('/auth/verify-email', 'POST', { token: token.value })
         token.value = ''
         await auth.getProfile()
-        await router.replace({ name: 'account' })
+        await router.replace({ name: 'home' }) // the guards send an unverified account to verification
         break
       case 'forgot':
         await api('/auth/forgot-password', 'POST', { email: email.value })

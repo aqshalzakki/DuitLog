@@ -1,24 +1,24 @@
-# Fase 5 · Product UX (slice 1–6)
+# Fase 5 · Product UX (slice 1–7)
 
 Slice ini mencakup SCR-05, SCR-06, SCR-09 (sebagian), SCR-10, SCR-11, SCR-19 dan SCR-21 (koreksi konflik). Rujukan: PR-BAL-01, PR-DASH-01/05/06/07/08, PR-TXN-01–08 (tanpa lampiran), PR-REC-01/03/04/09, PR-OFF-03–05, dan §6.4. **Fase 5 dan gate G4 belum selesai.**
 
 Slice 2 menambah Riwayat, detail, edit/hapus/restore, Baru dihapus, Kategori, dan Piutang (daftar peminjam).
 Slice 4 menambah Laporan (SCR-20) dan statistik periode di Beranda (sebagian SCR-09). Rujukan: BR-RPT-01–08, BR-RPT-11, PR-DASH-02/03, PR-RPT-01–06, AC-20.
+Slice 7 menambah pendaratan di Beranda setelah login/verifikasi, navigasi bawah mobile lima slot, dan Audit terkait di Detail transaksi. Rujukan: PRD §3.1, PR-UX-03, PR-HIS-03.
 Slice 6 menambah kategori default, pencarian/filter Riwayat, ubah profil peminjam, dan peringatan logout bila ada pending. Rujukan: BR-HIS-01, BR-HIS-06, BR-OFF-16, PR-CAT-01, PR-HIS-02, PR-OFF-10, PR-SEC-07.
 Slice 5 menambah Pengaturan (sebagian SCR-23): tema dan zona waktu akun. Rujukan: BR-RPT-11, BR-UX-03, PR-RPT-10, PR-SET-01/02, PR-NFR-11.
 Slice 3 menambah Penyesuaian Saldo (SCR-16), Detail Peminjam (SCR-18), dan Audit (SCR-24). Rujukan: PR-BAL-02–04, PR-BAL-06, PR-REC-06/07, PR-HIS-08.
 
 Belum termasuk:
-- "Audit terkait" di Detail transaksi. Server belum bisa memfilter audit per resource.
 - Ekspor PDF/Excel dan status job (Fase 6, worker)
 - Daftar detail transaksi di halaman Laporan. Ringkasan, seri, dan tabel per kategori/peminjam sudah ada; daftar per transaksi menyusul bersama ekspor.
 - Grafik di Beranda. Beranda hanya menampilkan ringkasan periode dengan tautan ke Laporan, tempat grafik berada.
 - Perbandingan periode untuk Pergerakan Saldo dan Piutang. Yang ada baru perbandingan pemasukan, pengeluaran, dan selisih bersih.
 - Draft persisten, lampiran, dan Audit History
 - Bagian lain SCR-23: profil, PIN/keamanan, dan hapus data offline. Sesi perangkat tetap di `/sessions`.
-- Bottom navigation mobile lima slot
 - Peringatan logout di halaman verifikasi email (`AuthPage`). Akun belum terverifikasi tidak bisa punya pending, jadi halaman ini dibiarkan.
-- Login dan verifikasi masih mendarat di `/account`. Beranda ada di `/`.
+- Sidebar desktop. Desktop tetap memakai navigasi atas yang membungkus; fungsinya sama dengan navigasi bawah mobile.
+- Indikator sinkron di header mobile. Tautan Sinkronisasi tetap di navigasi atas.
 
 ## Perilaku
 
@@ -96,6 +96,16 @@ Backend slice 3:
 | Peringatan logout | Di `/account` dan `/sessions`, "Keluar", "Keluar dari semua perangkat", dan "Cabut" pada sesi perangkat ini lebih dulu menampilkan peringatan bila: ada item antrean yang belum `SYNCED`, ada transaksi online yang sedang dikirim/diperiksa, atau Akses Offline milik akun ini terkunci (jumlahnya tidak bisa dihitung). "Tetap keluar" melanjutkan; tidak ada data lokal yang dihapus. Helper uji `logout()` kini mengonfirmasi peringatan itu. |
 
 **Usulan, dapat direview:** nama aksi audit `DEFAULT_CATEGORIES_CREATED` (label "Kategori default dibuat" beserta daftar namanya di Audit); pencarian tidak mencakup nama kategori atau peminjam.
+
+## Slice 7
+
+| Bagian | Implementasi |
+| --- | --- |
+| Pendaratan | Login dan verifikasi email berhasil → `/` (Beranda). Guard yang ada mengarahkan akun belum terverifikasi ke verifikasi dan akun dengan saldo awal pending ke `/onboarding`. `/verify-email` untuk akun terverifikasi → Beranda. |
+| Navigasi bawah | Di bawah 40rem: Beranda · Transaksi · + Tambah · Piutang · Laporan (Laporan hanya untuk sesi terverifikasi, jadi tidak ada saat boot offline). Tautan yang sama di header disembunyikan di mobile; sisanya (Kategori, Sinkronisasi, Offline, Pengaturan, Akun, Perangkat, Audit) tetap di header yang membungkus. "+ Tambah" adalah tombol `aria-expanded` yang membuka empat pilihan Quick Add; Escape menutup dan mengembalikan fokus, dan pindah rute juga menutup. `viewport-fit=cover` di `index.html` mengaktifkan inset safe area: navigasi bawah memakai inset bawah dan header inset atas. Target sentuh ≥ 44px. `main` diberi ruang bawah, dan `scroll-padding-bottom` menjaga kontrol yang difokus tidak tertutup bar (WCAG 2.2 SC 2.4.11). Ketukan di luar menu + menutupnya. Di Detail, status "memuat" dan "gagal" dibedakan. Semua perjalanan UI diuji di viewport ponsel 390px (sudah begitu sejak awal). Helper `link()` kini hanya mengklik tautan yang terlihat, jadi salinan header yang disembunyikan di mobile tidak pernah diklik; uji Riwayat memakai slot "Transaksi". Slice 7 memeriksa lebar desktop 1280px terpisah. |
+| Audit terkait | `GET /audit?resourceId=` (UUID, owner-scoped, kursor tetap jalan): entri dengan `details.resourceId` itu, ditambah entri yang `snapshotChanges`-nya menghitung ulang resource itu sebagai titik saldo. Detail transaksi menampilkan label aksi dan waktu aksi, dengan tautan ke Audit untuk rincian sebelum/sesudah. Label aksi dipindah ke `messages.ts` dan dipakai bersama. |
+
+`shortcut:` filter audit memakai `JSON_EXTRACT` dan memindai baris audit owner. Perlu kolom `resource_id` berindeks bila audit owner mencapai puluhan ribu baris. Detail transaksi hanya memuat halaman pertama (50 entri).
 
 ## Verifikasi
 
@@ -198,3 +208,18 @@ Verifikasi slice 6:
   - Ubah profil: nama kosong ditolak, simpan → server versi 2, perubahan dari perangkat lain → pesan versi dan data dimuat ulang;
   - pembayaran offline yang menjadi Konflik → "Keluar" menampilkan "1 transaksi … belum tersinkron", Batal tetap di halaman; pindah ke Perangkat menutup peringatan; "Cabut" sesi ini → peringatan "Cabut sesi ini" → Tetap keluar → `/login`; server tidak punya pembayaran itu; masuk lagi dan buka kunci → item Konflik masih ada untuk akun yang sama.
 - Tidak diuji: migrasi 0004 terhadap database yang sudah berisi akun (tiap suite memakai database baru), dan pesan "sedang diperiksa hasilnya" saat logout.
+
+Verifikasi slice 7:
+- `phase2_financial.py` di MySQL:
+  - audit terkait sebuah transaksi = dipulihkan, dihapus, diubah, dicatat (urut waktu aksi);
+  - saldo awal ikut memuat transaksi mundur tanggal dan edit yang menghitung ulang selisihnya;
+  - akun lain mendapat daftar kosong;
+  - `resourceId` bukan UUID → 422.
+- `phase1_browser.py` dan helper `login()`: verifikasi dan login mendarat di Beranda (`/onboarding` untuk akun baru).
+- `phase5_slice7.py` lewat UI sungguhan:
+  - di lebar 1280px tidak ada navigasi bawah;
+  - di 375px: lima slot berurutan, duplikat header tersembunyi, tanpa scroll ke samping, target ≥ 44px;
+  - "+ Tambah" membuka empat pilihan, Escape menutup dan fokus kembali ke tombol, pilihan Pengeluaran membuka form dan menutup menu;
+  - transaksi tersimpan, lalu Detail menampilkan tepat satu entri audit terkait "Transaksi dicatat".
+  - di Kategori (10 default), setiap kontrol yang difokus berada di atas bar; ketukan di luar menu + menutupnya.
+- Tidak diuji: iOS Safari sungguhan (safe area dan keyboard), dan pembaca layar.

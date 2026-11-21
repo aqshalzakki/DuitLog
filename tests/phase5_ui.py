@@ -21,9 +21,11 @@ def user(api_port, origin, mail, label):
 
 
 def link(page, text):
-    """In-app navigation by link text; a full page load would be a Hard Lock."""
-    page.see(f"Array.from(document.querySelectorAll('a')).some(a => a.textContent.trim() === {json.dumps(text)})")
-    page.js(f"Array.from(document.querySelectorAll('a')).find(a => a.textContent.trim() === {json.dumps(text)}).click()")
+    """In-app navigation by link text; a full page load would be a Hard Lock. Only a link the user can
+    see counts, so a header copy hidden on mobile is never clicked."""
+    match = f"Array.from(document.querySelectorAll('a')).find(a => a.textContent.trim() === {json.dumps(text)} && a.getClientRects().length)"
+    page.see(f"!!{match}")
+    page.js(f"{match}.click()")
 
 
 def select(page, selector, value):

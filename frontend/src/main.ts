@@ -72,7 +72,7 @@ router.beforeEach(async (to) => {
   if (to.meta.session && offlineBoot()) return { name: 'offline' }
   if (to.meta.session && !auth.profile) return { name: 'login' }
   if (to.meta.verified && !auth.profile?.emailVerified) return { name: 'verify' }
-  if (to.name === 'verify' && auth.profile?.emailVerified) return { name: 'account' }
+  if (to.name === 'verify' && auth.profile?.emailVerified) return { name: 'home' }
 })
 
 watch(() => auth.profile?.id, (id, previous) => {

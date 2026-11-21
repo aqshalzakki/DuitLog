@@ -93,8 +93,11 @@ def run_chrome(browser, env, origin, work, mail):
             see("location.pathname === '/verify-email' && !!document.querySelector('#token')")
             fill("#token", token)
             submit()
-            see("location.pathname === '/account' && document.querySelector('main').textContent.includes('Browser test')")
+            # Verified: lands on Beranda, which sends a new account to its opening balance.
+            see("location.pathname === '/onboarding'")
             cdp("Page.reload")
+            see("location.pathname === '/onboarding' && !!document.querySelector('a[href=\"/account\"]')")
+            js("""document.querySelector('a[href="/account"]').click()""")
             see("location.pathname === '/account' && document.querySelector('main')?.textContent.includes('Browser test')")
             check(js("document.cookie.includes('duit-access') || document.cookie.includes('duit-refresh')"), False)
             check(js("localStorage.length + sessionStorage.length"), 0)

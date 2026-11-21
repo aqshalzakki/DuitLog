@@ -10,6 +10,8 @@ from phase1_auth import PASSWORD, ROOT, Client, check, mail_token, process, wait
 
 PASSPHRASE = "synthetic offline passphrase"
 PIN, NEW_PIN = "246810", "135790"
+DESKTOP = {"width": 1280, "height": 900, "deviceScaleFactor": 1, "mobile": False}
+MOBILE = {"width": 390, "height": 840, "deviceScaleFactor": 1, "mobile": True}
 MARKER = "PLAINTEXT-MARKER-7f3a"
 MINUTE, DAY = 60_000, 24 * 60 * 60_000
 # Test-only clock: the app reads Date.now(), so shifting it here needs no hook in app code.
@@ -135,7 +137,7 @@ class Chrome:
         page.cdp("Page.addScriptToEvaluateOnNewDocument", source=CLOCK)
         page.cdp("Network.enable")
         page.cdp("Network.setBlockedURLs", urls=["*/api/v1/*"] if blocked else [])
-        page.cdp("Emulation.setDeviceMetricsOverride", width=390, height=840, deviceScaleFactor=1, mobile=True)
+        page.cdp("Emulation.setDeviceMetricsOverride", **MOBILE)  # journeys run on a phone-sized viewport
         return page
 
     def new_tab(self, url):
@@ -150,7 +152,7 @@ def login(page, origin, email):
     page.fill("#email", email)
     page.fill("#password", PASSWORD)
     page.submit("#password")
-    page.see("location.pathname === '/account'")
+    page.see("['/', '/onboarding'].includes(location.pathname)")  # login lands on Beranda
 
 
 def logout(page, origin):
@@ -279,6 +281,8 @@ def offline_test(browser, env, origin, api_port, work, mail):
         settings_test(chrome, origin, api_port, mail)
         from phase5_slice6 import slice6_test
         slice6_test(chrome, origin, api_port, mail)
+        from phase5_slice7 import slice7_test
+        slice7_test(chrome, origin, api_port, mail)
 
 
 def run(chrome, origin, api_port, mail):

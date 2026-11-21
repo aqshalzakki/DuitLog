@@ -28,7 +28,7 @@ def activities(client, deleted=False):
 
 
 def open_activity(page, title):
-    link(page, "Riwayat")
+    link(page, "Transaksi")  # bottom-nav slot for Riwayat
     page.see("location.pathname === '/history'")
     link(page, title)
     page.see("location.pathname.startsWith('/activity/') && !!document.querySelector('.details')")

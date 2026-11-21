@@ -23,3 +23,15 @@ export const REASONS: Record<string, string> = {
   INVALID_AMOUNT: 'Nominal harus Rupiah bulat lebih dari Rp0.',
   STORAGE: 'Tidak dapat menyimpan di perangkat. Tidak ada yang tersimpan.',
 }
+
+/** Audit action labels, shared by the Audit page and a transaction's related audit. */
+export const ACTIONS: Record<string, string> = {
+  ACTIVITY_CREATED: 'Transaksi dicatat', ACTIVITY_EDITED: 'Transaksi diubah', ACTIVITY_DELETED: 'Transaksi dihapus',
+  ACTIVITY_RESTORED: 'Transaksi dipulihkan', BALANCE_ADJUSTMENT: 'Penyesuaian saldo', OPENING_BALANCE: 'Saldo awal',
+  OPENING_SKIPPED: 'Saldo awal dilewati', BORROWER_CREATED: 'Peminjam ditambahkan', BORROWER_EDITED: 'Peminjam diubah',
+  BORROWER_ARCHIVED: 'Peminjam diarsipkan', BORROWER_REACTIVATED: 'Peminjam diaktifkan kembali',
+  CATEGORY_CREATED: 'Kategori ditambahkan', CATEGORY_RENAMED: 'Kategori diganti nama', CATEGORY_ARCHIVED: 'Kategori diarsipkan',
+  CATEGORY_RESTORED: 'Kategori diaktifkan kembali', INTEGRITY_FREEZE: 'Pemeriksaan integritas dimulai',
+  INTEGRITY_UNFREEZE: 'Pemeriksaan integritas selesai', TIMEZONE_CHANGED: 'Zona waktu akun diubah',
+  DEFAULT_CATEGORIES_CREATED: 'Kategori default dibuat',
+}

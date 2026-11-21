@@ -22,6 +22,13 @@ API memakai JSON camelCase, error `code`, `message`, `requestId` dan `fieldError
 
 ## Menjalankan di pengembangan lokal
 
+**Cara cepat untuk mencoba di browser:** `python tests/dev_local.py`. Skrip ini menjalankan:
+- MySQL pribadi di `.dev-local/` pada `127.0.0.1:3307` (data bertahan antar-run; `--reset` mengosongkan);
+- relay SMTP palsu yang mencetak kode verifikasi/reset ke terminal dan `.dev-local/mail.log`;
+- migrasi, API, worker, dan Vite di `http://localhost:5173`.
+
+Ctrl+C menghentikan semuanya. Kalau jendela terminal ditutup paksa, proses anak (mysqld, api, worker, node) bisa tertinggal dan memegang port 3307/3000/5173; hentikan proses itu dulu sebelum menjalankan ulang. `--smoke` adalah cek mandiri: mendaftarkan satu akun, menunggu kodenya, lalu berhenti. Hanya untuk pengembangan: root MySQL di folder ini tanpa kata sandi.
+
 Siapkan MySQL khusus pengembangan dan relay SMTP uji lokal. Masukkan nilai konfigurasi berikut sebagai environment variable untuk proses terkait.
 
 | Variable | Nilai lokal atau fungsi |

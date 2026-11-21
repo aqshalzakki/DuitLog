@@ -1,12 +1,28 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useAuth } from './session'
 import { VaultError, useVault } from './vault/store'
 
 const auth = useAuth()
 const vault = useVault()
 const router = useRouter()
+const route = useRoute()
+// Mobile bottom navigation (PRD §3.1): the + slot opens the four Quick Add choices.
+const adding = ref(false)
+const addButton = ref<HTMLButtonElement>()
+watch(() => route.fullPath, () => { adding.value = false })
+const addArea = ref<HTMLElement>()
+// A phone has no Escape: a tap anywhere outside the menu closes it.
+function outside(event: PointerEvent) {
+  if (adding.value && !addArea.value?.contains(event.target as Node)) adding.value = false
+}
+onMounted(() => document.addEventListener('pointerdown', outside))
+onUnmounted(() => document.removeEventListener('pointerdown', outside))
+function closeAdd() {
+  adding.value = false
+  addButton.value?.focus()
+}
 const pin = ref('')
 const pinError = ref('')
 const pinInput = ref<HTMLInputElement>()
@@ -46,11 +62,11 @@ async function strongUnlock() {
     <RouterLink to="/" class="wordmark"><span aria-hidden="true">D</span>Duit Log</RouterLink>
     <nav v-if="auth.profile || offline" aria-label="Utama">
       <template v-if="auth.profile?.emailVerified || offline">
-        <RouterLink to="/">Beranda</RouterLink>
-        <RouterLink to="/history">Riwayat</RouterLink>
-        <RouterLink to="/borrowers">Piutang</RouterLink>
+        <RouterLink class="in-bottom" to="/">Beranda</RouterLink>
+        <RouterLink class="in-bottom" to="/history">Riwayat</RouterLink>
+        <RouterLink class="in-bottom" to="/borrowers">Piutang</RouterLink>
         <RouterLink to="/categories">Kategori</RouterLink>
-        <RouterLink v-if="auth.profile?.emailVerified" to="/reports">Laporan</RouterLink>
+        <RouterLink class="in-bottom" v-if="auth.profile?.emailVerified" to="/reports">Laporan</RouterLink>
         <RouterLink to="/sync">Sinkronisasi</RouterLink>
         <RouterLink to="/offline">Offline</RouterLink>
         <RouterLink to="/settings">Pengaturan</RouterLink>
@@ -84,4 +100,20 @@ async function strongUnlock() {
       <component :is="Component" :key="route.name" />
     </RouterView>
   </main>
+  <nav v-if="auth.profile?.emailVerified || offline" class="bottom-nav" aria-label="Navigasi bawah" data-bottom-nav>
+    <RouterLink to="/">Beranda</RouterLink>
+    <RouterLink to="/history">Transaksi</RouterLink>
+    <div ref="addArea" class="add" @keydown.esc="closeAdd">
+      <button ref="addButton" type="button" aria-controls="add-menu" :aria-expanded="adding"
+        @click="adding = !adding"><span aria-hidden="true">+</span> Tambah</button>
+      <ul v-if="adding" id="add-menu" class="add-menu">
+        <li><RouterLink to="/add/increase">Pemasukan</RouterLink></li>
+        <li><RouterLink to="/add/deduct">Pengeluaran</RouterLink></li>
+        <li><RouterLink to="/add/loan">Tambah piutang</RouterLink></li>
+        <li><RouterLink to="/add/repayment">Terima pembayaran</RouterLink></li>
+      </ul>
+    </div>
+    <RouterLink to="/borrowers">Piutang</RouterLink>
+    <RouterLink v-if="auth.profile?.emailVerified" to="/reports">Laporan</RouterLink>
+  </nav>
 </template>

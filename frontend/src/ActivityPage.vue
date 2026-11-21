@@ -2,7 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { type Op, newOp, send, useFinance } from './finance'
-import { REASONS } from './messages'
+import { ACTIONS, REASONS } from './messages'
 import { KINDS, formatTime, rupiah } from './money'
 import { ApiError, useAuth } from './session'
 
@@ -40,7 +40,20 @@ async function load() {
   }
 }
 
-onMounted(() => Promise.all([finance.load(), load()]))
+// PR-HIS-03: audit entries about this transaction, newest first; owner-scoped on the server.
+type AuditItem = { id: number; action: string; actionAt: string; actor: string }
+const related = ref<AuditItem[]>()
+const relatedFailed = ref(false)
+async function loadRelated() {
+  try {
+    related.value = (await auth.authorized<{ items: AuditItem[] }>('/audit?resourceId=' + encodeURIComponent(id))).items
+    relatedFailed.value = false
+  } catch {
+    relatedFailed.value = !related.value
+  }
+}
+
+onMounted(() => Promise.all([finance.load(), load(), loadRelated()]))
 
 async function act(path: string, method: string, body: Record<string, unknown>, done: string) {
   if (busy.value || !activity.value) return
@@ -52,7 +65,7 @@ async function act(path: string, method: string, body: Record<string, unknown>, 
     await send(op)
     if (op.state === 'confirmed') {
       message.value = { tone: 'success', text: done }
-      await Promise.all([load(), finance.load()])
+      await Promise.all([load(), finance.load(), loadRelated()])
     } else if (op.state === 'checking') {
       message.value = { tone: 'info', text: 'Hasilnya belum diketahui. Tekan lagi untuk memeriksa; tidak akan diterapkan dua kali.' }
     } else {
@@ -111,6 +124,18 @@ const sign = (kind: string) => (kind === 'DEDUCT' || kind === 'LOAN' ? '−' : '
         <button v-if="!activity.deleted" type="button" class="secondary" :disabled="busy" @click="openDelete">Hapus</button>
         <button v-else type="button" class="secondary" :disabled="busy" @click="restore">Pulihkan</button>
       </div>
+      <h2>Audit terkait</h2>
+      <p v-if="relatedFailed" class="hint">Audit terkait gagal dimuat.</p>
+      <p v-else-if="!related" class="hint">Memuat audit terkait…</p>
+      <ol v-else class="recent" data-related-audit>
+        <li v-for="item in related" :key="item.id" :data-action="item.action">
+          <div>
+            <strong>{{ ACTIONS[item.action] ?? item.action }}</strong>
+            <p>{{ formatTime(item.actionAt) }}<template v-if="item.actor !== auth.profile?.id"> · Operator: {{ item.actor }}</template></p>
+          </div>
+        </li>
+      </ol>
+      <p class="hint">Diurutkan menurut waktu aksi. Rincian sebelum/sesudah ada di <RouterLink to="/audit">Audit</RouterLink>.</p>
     </template>
     <RouterLink to="/history">Kembali ke Riwayat</RouterLink>
 

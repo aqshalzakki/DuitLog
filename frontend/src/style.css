@@ -103,11 +103,11 @@ button:disabled { cursor: wait; opacity: 0.7; }
   justify-content: space-between;
   gap: 1rem;
   max-width: 74rem;
-  padding: 1.15rem max(1rem, env(safe-area-inset-right)) 1.15rem max(1rem, env(safe-area-inset-left));
+  padding: max(1.15rem, env(safe-area-inset-top)) max(1rem, env(safe-area-inset-right)) 1.15rem max(1rem, env(safe-area-inset-left));
   margin: auto;
   border-bottom: 1px solid var(--line);
 }
-.topbar nav { display: flex; gap: 1rem; }
+.topbar nav { display: flex; flex-wrap: wrap; gap: 0.25rem 1rem; }
 .topbar nav a { font-weight: 600; }
 .wordmark {
   display: inline-flex;
@@ -238,3 +238,54 @@ table.report td { font-variant-numeric: tabular-nums; }
 .bar.in { background: var(--green); }
 .bar.out { background: repeating-linear-gradient(45deg, var(--stripe) 0 3px, var(--stripe-gap) 3px 6px); }
 @media (max-width: 30rem) { table.report { font-size: 0.85rem; } }
+
+/* Mobile: five-slot bottom navigation (Home · Transaksi · + Tambah · Piutang · Laporan); the header keeps the rest. */
+.bottom-nav { display: none; }
+@media (max-width: 40rem) {
+  .topbar nav .in-bottom { display: none; }
+  .bottom-nav {
+    position: fixed;
+    inset: auto 0 0 0;
+    z-index: 2;
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: 1fr;
+    padding: 0.25rem max(0.25rem, env(safe-area-inset-right)) max(0.25rem, env(safe-area-inset-bottom)) max(0.25rem, env(safe-area-inset-left));
+    border-top: 1px solid var(--line);
+    background: var(--paper);
+  }
+  .bottom-nav > a, .bottom-nav .add > button {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    min-height: 3rem;
+    padding: 0.25rem;
+    border: 0;
+    background: transparent;
+    color: var(--green);
+    font-size: 0.85rem;
+    font-weight: 650;
+    text-align: center;
+  }
+  .bottom-nav > a.router-link-exact-active { text-decoration: underline; text-decoration-thickness: 2px; }
+  .bottom-nav .add { position: relative; }
+  .bottom-nav .add > button { border-radius: 0.55rem; background: var(--green); color: var(--on-green); }
+  .add-menu {
+    position: absolute;
+    bottom: calc(100% + 0.5rem);
+    left: 50%;
+    width: max-content;
+    transform: translateX(-50%);
+    margin: 0;
+    padding: 0.35rem;
+    list-style: none;
+    border: 1px solid var(--line);
+    border-radius: 0.55rem;
+    background: var(--paper);
+    box-shadow: 0 0.5rem 1.5rem var(--shadow);
+  }
+  .add-menu a { display: flex; align-items: center; min-height: 2.75rem; padding: 0 0.75rem; font-weight: 650; }
+  main { padding-bottom: calc(5rem + env(safe-area-inset-bottom)); }
+  html { scroll-padding-bottom: calc(5rem + env(safe-area-inset-bottom)); } /* focus never lands under the bar */
+}

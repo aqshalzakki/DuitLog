@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
+import { ACTIONS } from './messages'
 import { formatTime, rupiah } from './money'
 import { useAuth } from './session'
 
@@ -14,16 +15,6 @@ type Item = {
   }
 }
 
-const ACTIONS: Record<string, string> = {
-  ACTIVITY_CREATED: 'Transaksi dicatat', ACTIVITY_EDITED: 'Transaksi diubah', ACTIVITY_DELETED: 'Transaksi dihapus',
-  ACTIVITY_RESTORED: 'Transaksi dipulihkan', BALANCE_ADJUSTMENT: 'Penyesuaian saldo', OPENING_BALANCE: 'Saldo awal',
-  OPENING_SKIPPED: 'Saldo awal dilewati', BORROWER_CREATED: 'Peminjam ditambahkan', BORROWER_EDITED: 'Peminjam diubah',
-  BORROWER_ARCHIVED: 'Peminjam diarsipkan', BORROWER_REACTIVATED: 'Peminjam diaktifkan kembali',
-  CATEGORY_CREATED: 'Kategori ditambahkan', CATEGORY_RENAMED: 'Kategori diganti nama', CATEGORY_ARCHIVED: 'Kategori diarsipkan',
-  CATEGORY_RESTORED: 'Kategori diaktifkan kembali', INTEGRITY_FREEZE: 'Pemeriksaan integritas dimulai',
-  INTEGRITY_UNFREEZE: 'Pemeriksaan integritas selesai', TIMEZONE_CHANGED: 'Zona waktu akun diubah',
-  DEFAULT_CATEGORIES_CREATED: 'Kategori default dibuat',
-}
 const FIELDS: Record<string, string> = {
   amount: 'Nominal', effectiveAt: 'Waktu efektif', title: 'Judul', description: 'Deskripsi', categoryId: 'Kategori',
   borrowerId: 'Peminjam', affectCashBalance: 'Pengaruh saldo', name: 'Nama', phone: 'Telepon', notes: 'Catatan',
